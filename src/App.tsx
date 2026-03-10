@@ -1,0 +1,1115 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  Clock, 
+  Play, 
+  Pause, 
+  RotateCcw, 
+  Settings, 
+  Plus, 
+  Trash2, 
+  ChevronUp, 
+  ChevronDown,
+  Monitor,
+  LayoutDashboard,
+  LogIn,
+  LogOut,
+  AlertCircle,
+  History,
+  Download,
+  Calendar
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { 
+  collection, 
+  doc, 
+  onSnapshot, 
+  setDoc, 
+  updateDoc, 
+  deleteDoc, 
+  query, 
+  orderBy, 
+  getDocs,
+  writeBatch,
+  getDocFromServer,
+  addDoc,
+  limit
+} from 'firebase/firestore';
+import { 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  onAuthStateChanged, 
+  signOut,
+  User
+} from 'firebase/auth';
+import { db, auth } from './firebase';
+import { ServiceItem, ServiceState, ServiceStatus, ServiceType, ServiceLog } from './types';
+import { TimePicker } from './components/TimePicker';
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: any[];
+  }
+}
+
+const handleFirestoreError = (error: any, operationType: OperationType, path: string | null) => {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+};
+
+const INITIAL_ITEMS = [
+  "PROCESSING",
+  "INTROIT",
+  "PRESENTATION OF COLORS",
+  "CALL TO WORSHIP",
+  "PRAISE AND ADORATION",
+  "BIBLE STUDIES",
+  "BIBLE READING",
+  "ANTHEM BY CHURCH CHOIR",
+  "TITHE AND OFFERING",
+  "THANKGIVING",
+  "KOFR & AMA ANNOUNCEMENT"
+];
+
+const COMMON_ITEMS = [
+  ...INITIAL_ITEMS,
+  "OPENING PRAYER",
+  "WELCOME ADDRESS",
+  "SERMON",
+  "COMMUNION",
+  "BENEDICTION",
+  "CLOSING PRAYER"
+];
+
+export default function App() {
+  const [items, setItems] = useState<ServiceItem[]>([]);
+  const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
+  const [logs, setLogs] = useState<ServiceLog[]>([]);
+  const [state, setState] = useState<ServiceState>({
+    activeItemId: null,
+    activeServiceTypeId: null,
+    startTime: null,
+    serviceStartTime: null,
+    status: 'idle',
+    remainingSeconds: 0
+  });
+  const [user, setUser] = useState<User | null>(null);
+  const [view, setView] = useState<'display' | 'control' | 'setup' | 'history'>('display');
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [newItemTitle, setNewItemTitle] = useState('');
+  const [newItemDuration, setNewItemDuration] = useState(5);
+  const [newServiceTypeName, setNewServiceTypeName] = useState('');
+  const [newServiceTypeStart, setNewServiceTypeStart] = useState('09:00 AM');
+  const [newServiceTypeEnd, setNewServiceTypeEnd] = useState('11:00 AM');
+  const [newServiceTypeDuration, setNewServiceTypeDuration] = useState(120);
+
+  const [activePicker, setActivePicker] = useState<{
+    type: 'time' | 'duration';
+    title: string;
+    onConfirm: (val: string) => void;
+  } | null>(null);
+
+  // Sync current time
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Auth listener
+  useEffect(() => {
+    return onAuthStateChanged(auth, (u) => setUser(u));
+  }, []);
+
+  // Test Connection
+  useEffect(() => {
+    const testConnection = async () => {
+      try {
+        await getDocFromServer(doc(db, 'service_config', 'connection_test'));
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('the client is offline')) {
+          console.error("Please check your Firebase configuration. The client is offline.");
+        }
+      }
+    };
+    testConnection();
+  }, []);
+
+  // Firestore sync: Items
+  useEffect(() => {
+    const q = query(collection(db, 'service_items'), orderBy('order', 'asc'));
+    return onSnapshot(q, (snapshot) => {
+      const newItems = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ServiceItem));
+      setItems(newItems);
+      
+      // Seed if empty
+      if (newItems.length === 0 && user?.email === "charleskcoffie@gmail.com") {
+        seedInitialItems();
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'service_items');
+    });
+  }, [user]);
+
+  // Firestore sync: Service Types
+  useEffect(() => {
+    return onSnapshot(collection(db, 'service_types'), (snapshot) => {
+      const types = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ServiceType));
+      setServiceTypes(types);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'service_types');
+    });
+  }, []);
+
+  // Firestore sync: State
+  useEffect(() => {
+    return onSnapshot(doc(db, 'service_config', 'current'), (snapshot) => {
+      if (snapshot.exists()) {
+        setState(snapshot.data() as ServiceState);
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'service_config/current');
+    });
+  }, []);
+
+  // Firestore sync: Logs
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, 'service_logs'), orderBy('startTime', 'desc'), limit(100));
+    return onSnapshot(q, (snapshot) => {
+      const newLogs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ServiceLog));
+      setLogs(newLogs);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'service_logs');
+    });
+  }, [user]);
+
+  const seedInitialItems = async () => {
+    const batch = writeBatch(db);
+    INITIAL_ITEMS.forEach((title, index) => {
+      const newDoc = doc(collection(db, 'service_items'));
+      batch.set(newDoc, {
+        title,
+        duration: 10,
+        order: index + 1
+      });
+    });
+    await batch.commit();
+  };
+
+  const handleLogin = async () => {
+    const provider = new GoogleAuthProvider();
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (error) {
+      console.error("Login failed", error);
+    }
+  };
+
+  const handleLogout = () => signOut(auth);
+
+  const updateServiceState = async (updates: Partial<ServiceState>) => {
+    await setDoc(doc(db, 'service_config', 'current'), { ...state, ...updates }, { merge: true });
+  };
+
+  const recordLog = async (endTime: number) => {
+    if (!state.activeItemId || !state.startTime) return;
+    const item = items.find(i => i.id === state.activeItemId);
+    const type = serviceTypes.find(t => t.id === state.activeServiceTypeId);
+    if (!item) return;
+
+    try {
+      await addDoc(collection(db, 'service_logs'), {
+        date: new Date().toISOString(),
+        serviceType: type?.name || 'Unknown',
+        activityName: item.title,
+        startTime: state.startTime,
+        endTime: endTime,
+        durationSeconds: Math.floor((endTime - state.startTime) / 1000),
+        totalServiceStartTime: state.serviceStartTime ?? null
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'service_logs');
+    }
+  };
+
+  const toggleTimer = async () => {
+    if (state.status === 'running') {
+      // Pause: calculate remaining time
+      const now = Date.now();
+      const elapsed = Math.floor((now - (state.startTime || now)) / 1000);
+      const remaining = Math.max(0, state.remainingSeconds - elapsed);
+      
+      // Record log when pausing/stopping
+      await recordLog(now);
+      
+      await updateServiceState({ status: 'paused', remainingSeconds: remaining, startTime: null });
+    } else {
+      // Start/Resume
+      await updateServiceState({ status: 'running', startTime: Date.now() });
+    }
+  };
+
+  const resetTimer = async () => {
+    if (state.status === 'running' && state.startTime) {
+      await recordLog(Date.now());
+    }
+    const activeItem = items.find(i => i.id === state.activeItemId);
+    await updateServiceState({
+      status: 'idle',
+      startTime: null,
+      remainingSeconds: (activeItem?.duration || 0) * 60
+    });
+  };
+
+  const selectItem = async (itemId: string) => {
+    const item = items.find(i => i.id === itemId);
+    if (!item) return;
+
+    // If there was an active item running, record it
+    if (state.status === 'running' && state.startTime) {
+      await recordLog(Date.now());
+    }
+
+    await updateServiceState({
+      activeItemId: itemId,
+      status: 'idle',
+      startTime: null,
+      remainingSeconds: item.duration * 60
+    });
+  };
+
+  const selectServiceType = async (typeId: string) => {
+    if (!user) return;
+    await updateServiceState({ activeServiceTypeId: typeId });
+  };
+
+  const startService = async () => {
+    if (!user) return;
+    await updateServiceState({ serviceStartTime: Date.now() });
+  };
+
+  const resetService = async () => {
+    if (!user) return;
+    
+    // Record final activity if running
+    if (state.status === 'running' && state.startTime) {
+      await recordLog(Date.now());
+    }
+
+    await updateServiceState({ serviceStartTime: null });
+  };
+
+  const addServiceType = async () => {
+    if (!newServiceTypeName) return;
+    const newDoc = doc(collection(db, 'service_types'));
+    await setDoc(newDoc, {
+      name: newServiceTypeName,
+      startTime: newServiceTypeStart,
+      endTime: newServiceTypeEnd,
+      duration: newServiceTypeDuration
+    });
+    setNewServiceTypeName('');
+  };
+
+  const deleteServiceType = async (id: string) => {
+    await deleteDoc(doc(db, 'service_types', id));
+  };
+
+  const addItem = async () => {
+    if (!newItemTitle) return;
+    const newDoc = doc(collection(db, 'service_items'));
+    await setDoc(newDoc, {
+      title: newItemTitle,
+      duration: newItemDuration,
+      order: items.length + 1
+    });
+    setNewItemTitle('');
+  };
+
+  const moveItem = async (index: number, direction: 'up' | 'down') => {
+    if (!user) return;
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= items.length) return;
+
+    const item1 = items[index];
+    const item2 = items[targetIndex];
+
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'service_items', item1.id), { order: item2.order });
+    batch.update(doc(db, 'service_items', item2.id), { order: item1.order });
+    await batch.commit();
+  };
+
+  const updateItemDuration = async (id: string, newDuration: number) => {
+    if (!user) return;
+    await updateDoc(doc(db, 'service_items', id), { duration: newDuration });
+    
+    // If this is the active item and we're idle, update remaining time
+    if (state.activeItemId === id && state.status === 'idle') {
+      await updateServiceState({ remainingSeconds: newDuration * 60 });
+    }
+  };
+
+  const quickStartByNumber = async (num: number) => {
+    const item = items[num - 1];
+    if (item) {
+      // If there was an active item running, record it
+      if (state.status === 'running' && state.startTime) {
+        await recordLog(Date.now());
+      }
+
+      await updateServiceState({
+        activeItemId: item.id,
+        status: 'running',
+        startTime: Date.now(),
+        remainingSeconds: item.duration * 60
+      });
+    }
+  };
+
+  const deleteItem = async (id: string) => {
+    if (!user) return;
+    
+    // If deleting active item, record it first
+    if (state.activeItemId === id && state.status === 'running' && state.startTime) {
+      await recordLog(Date.now());
+      await updateServiceState({ activeItemId: null, status: 'idle', startTime: null, remainingSeconds: 0 });
+    }
+
+    await deleteDoc(doc(db, 'service_items', id));
+  };
+
+  const exportLogsCSV = () => {
+    if (logs.length === 0) return;
+
+    const headers = ['Date', 'Service Type', 'Activity', 'Start Time', 'End Time', 'Duration (s)', 'Total Service Duration (s)'];
+    const csvContent = [
+      headers.join(','),
+      ...logs.map(log => {
+        const date = new Date(log.date).toLocaleDateString();
+        const start = new Date(log.startTime).toLocaleTimeString();
+        const end = new Date(log.endTime).toLocaleTimeString();
+        const totalDuration = log.totalServiceStartTime ? Math.floor((log.endTime - log.totalServiceStartTime) / 1000) : 0;
+        
+        return [
+          `"${date}"`,
+          `"${log.serviceType}"`,
+          `"${log.activityName}"`,
+          `"${start}"`,
+          `"${end}"`,
+          log.durationSeconds,
+          totalDuration
+        ].join(',');
+      })
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `service_report_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const currentRemaining = useMemo(() => {
+    if (state.status === 'running' && state.startTime) {
+      const elapsed = Math.floor((Date.now() - state.startTime) / 1000);
+      return state.remainingSeconds - elapsed;
+    }
+    return state.remainingSeconds;
+  }, [state, currentTime]);
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(Math.abs(seconds) / 60);
+    const secs = Math.abs(seconds) % 60;
+    const sign = seconds < 0 ? '-' : '';
+    return `${sign}${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const activeItem = items.find(i => i.id === state.activeItemId);
+  const activeServiceType = serviceTypes.find(t => t.id === state.activeServiceTypeId);
+  const isCritical = currentRemaining <= 60 && currentRemaining > 0;
+  const isTimeUp = currentRemaining <= 0 && state.status !== 'idle';
+
+  const serviceTimeElapsed = useMemo(() => {
+    if (state.serviceStartTime) {
+      return Math.floor((Date.now() - state.serviceStartTime) / 1000);
+    }
+    return 0;
+  }, [state.serviceStartTime, currentTime]);
+
+  const serviceRemaining = useMemo(() => {
+    if (activeServiceType && state.serviceStartTime) {
+      // If we have an explicit end time, we can use that for a more accurate countdown
+      // But for now, we'll stick to the duration-based logic as requested
+      return (activeServiceType.duration * 60) - serviceTimeElapsed;
+    }
+    return 0;
+  }, [activeServiceType, serviceTimeElapsed]);
+
+  return (
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-emerald-500/30">
+      {/* Top Navigation */}
+      {!isFullscreen && (
+        <nav className="fixed top-0 left-0 right-0 h-16 border-b border-white/5 bg-zinc-950/80 backdrop-blur-md z-50 flex items-center justify-between px-6">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center">
+              <Clock className="w-5 h-5 text-black" />
+            </div>
+            <span className="font-bold tracking-tight text-lg">SERVICE TIMER</span>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setView('display')}
+              className={`p-2 rounded-lg transition-colors ${view === 'display' ? 'bg-white/10 text-emerald-400' : 'text-zinc-400 hover:text-white'}`}
+              title="Display View"
+            >
+              <Monitor className="w-5 h-5" />
+            </button>
+            <button 
+              onClick={() => setView('control')}
+              className={`p-2 rounded-lg transition-colors ${view === 'control' ? 'bg-white/10 text-emerald-400' : 'text-zinc-400 hover:text-white'}`}
+              title="Control Panel"
+            >
+              <LayoutDashboard className="w-5 h-5" />
+            </button>
+            {user && (
+              <>
+                <button 
+                  onClick={() => setView('history')}
+                  className={`p-2 rounded-lg transition-colors ${view === 'history' ? 'bg-white/10 text-emerald-400' : 'text-zinc-400 hover:text-white'}`}
+                  title="Service History"
+                >
+                  <History className="w-5 h-5" />
+                </button>
+                <button 
+                  onClick={() => setView('setup')}
+                  className={`p-2 rounded-lg transition-colors ${view === 'setup' ? 'bg-white/10 text-emerald-400' : 'text-zinc-400 hover:text-white'}`}
+                  title="Setup & Order"
+                >
+                  <Settings className="w-5 h-5" />
+                </button>
+              </>
+            )}
+            
+            <div className="h-6 w-px bg-white/10 mx-2" />
+            
+            {user ? (
+              <div className="flex items-center gap-3">
+                <img src={user.photoURL || ''} className="w-8 h-8 rounded-full border border-white/10" alt="" />
+                <button onClick={handleLogout} className="text-sm text-zinc-400 hover:text-white">Sign Out</button>
+              </div>
+            ) : (
+              <button 
+                onClick={handleLogin}
+                className="flex items-center gap-2 bg-white text-black px-4 py-1.5 rounded-full text-sm font-semibold hover:bg-zinc-200 transition-colors"
+              >
+                <LogIn className="w-4 h-4" />
+                Admin Login
+              </button>
+            )}
+          </div>
+        </nav>
+      )}
+
+      <main className={`${!isFullscreen ? 'pt-24' : 'pt-0'} pb-12 px-6 max-w-7xl mx-auto min-h-screen flex flex-col justify-center`}>
+        <AnimatePresence mode="wait">
+          {view === 'display' ? (
+            <motion.div 
+              key="display"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="flex flex-col items-center justify-center min-h-[70vh] text-center"
+            >
+              {/* Current Wall Clock & Service Duration */}
+              <div className="flex flex-col items-center mb-12">
+                <div className="text-zinc-500 font-mono text-3xl md:text-5xl tracking-[0.2em] font-light">
+                  {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </div>
+                {state.serviceStartTime && (
+                  <div className="mt-4 flex items-center gap-3 text-emerald-500/60 font-mono text-sm tracking-widest uppercase">
+                    <span className="opacity-50">SERVICE DURATION:</span>
+                    <span className="font-bold">{formatTime(serviceTimeElapsed)}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Service Type Info */}
+              {activeServiceType && (
+                <div className="mb-8 flex flex-col items-center">
+                  <span className="text-zinc-500 font-mono text-xs tracking-widest uppercase mb-2">SERVICE TYPE</span>
+                  <div className="bg-white/5 border border-white/10 px-6 py-2 rounded-full flex items-center gap-4">
+                    <span className="text-emerald-400 font-bold uppercase">{activeServiceType.name}</span>
+                    <div className="w-px h-4 bg-white/10" />
+                    <span className={`font-mono font-bold ${serviceRemaining < 0 ? 'text-red-500' : 'text-zinc-400'}`}>
+                      {serviceRemaining < 0 ? 'TIME OVER: ' : 'SERVICE LEFT: '}
+                      {formatTime(serviceRemaining)}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Active Activity */}
+              <div className="mb-4">
+                <span className="text-emerald-500 font-mono text-lg tracking-[0.4em] uppercase opacity-70">
+                  CURRENTLY PROCEEDING
+                </span>
+                <h1 className="text-6xl md:text-8xl font-black tracking-tighter mt-6 uppercase">
+                  {activeItem?.title || "NO ACTIVE ITEM"}
+                </h1>
+              </div>
+
+              {/* Big Countdown */}
+              <div className={`mt-16 font-mono tabular-nums transition-colors duration-500 ${isTimeUp || isCritical ? 'text-red-500 animate-pulse' : 'text-white'}`}>
+                <span className="text-[18vw] leading-none font-bold">
+                  {formatTime(currentRemaining)}
+                </span>
+              </div>
+
+              {isTimeUp && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mt-8"
+                >
+                  <span className="text-red-500 font-black text-6xl md:text-8xl tracking-[0.2em] animate-pulse uppercase">
+                    TIME IS UP
+                  </span>
+                </motion.div>
+              )}
+
+              {isCritical && !isTimeUp && (
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="mt-12 flex items-center gap-4 text-red-500 bg-red-500/10 px-8 py-4 rounded-full border border-red-500/20"
+                >
+                  <AlertCircle className="w-8 h-8" />
+                  <span className="font-bold text-xl uppercase tracking-[0.3em]">Final Minute Warning</span>
+                </motion.div>
+              )}
+
+              {/* Fullscreen Toggle for Projection */}
+              <button 
+                onClick={() => setIsFullscreen(!isFullscreen)}
+                className="fixed bottom-16 right-8 p-3 bg-white/5 hover:bg-white/10 rounded-full text-zinc-500 hover:text-white transition-all group"
+                title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen for Projection"}
+              >
+                {isFullscreen ? <LayoutDashboard className="w-6 h-6" /> : <Monitor className="w-6 h-6" />}
+                <span className="absolute right-full mr-4 top-1/2 -translate-y-1/2 bg-zinc-900 px-3 py-1 rounded text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
+                  {isFullscreen ? "Show Controls" : "Fullscreen Projection Mode"}
+                </span>
+              </button>
+            </motion.div>
+          ) : view === 'control' ? (
+            <motion.div 
+              key="control"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="grid grid-cols-1 lg:grid-cols-3 gap-8"
+            >
+              {/* Left Column: Timer Controls */}
+              <div className="lg:col-span-1 space-y-6">
+                {/* Service Selection & Global Timer */}
+                <div className="bg-zinc-900 border border-white/5 rounded-2xl p-6">
+                  <h2 className="text-sm font-mono text-zinc-500 uppercase tracking-widest mb-6">Service Session</h2>
+                  
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-xs text-zinc-500 uppercase mb-1.5 block">Active Service</label>
+                      <select 
+                        disabled={!user}
+                        value={state.activeServiceTypeId || ''}
+                        onChange={(e) => selectServiceType(e.target.value)}
+                        className="w-full bg-zinc-950 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"
+                      >
+                        <option value="">Select Service Type...</option>
+                        {serviceTypes.map(t => (
+                          <option key={t.id} value={t.id}>{t.name} ({t.duration}m)</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="flex items-center justify-between p-4 bg-zinc-950 rounded-xl border border-white/5">
+                      <div>
+                        <div className="text-xs text-zinc-500 uppercase">Service Time</div>
+                        <div className={`text-2xl font-mono font-bold ${serviceRemaining < 0 ? 'text-red-500' : 'text-white'}`}>
+                          {formatTime(serviceRemaining)}
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        {!state.serviceStartTime ? (
+                          <button 
+                            disabled={!state.activeServiceTypeId || !user}
+                            onClick={startService}
+                            className="bg-emerald-500 text-black p-2 rounded-lg hover:bg-emerald-400 disabled:opacity-50"
+                            title="Start Service Session"
+                          >
+                            <Play className="w-5 h-5" />
+                          </button>
+                        ) : (
+                          <button 
+                            disabled={!user}
+                            onClick={resetService}
+                            className="bg-zinc-800 text-white p-2 rounded-lg hover:bg-zinc-700"
+                            title="Reset Service Session"
+                          >
+                            <RotateCcw className="w-5 h-5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-zinc-900 border border-white/5 rounded-2xl p-6">
+                  <h2 className="text-sm font-mono text-zinc-500 uppercase tracking-widest mb-6">Item Timer</h2>
+                  
+                  <div className="text-center mb-8">
+                    <div className="text-5xl font-mono font-bold mb-2">
+                      {formatTime(currentRemaining)}
+                    </div>
+                    <div className="text-emerald-500 text-sm font-bold uppercase tracking-widest">
+                      {activeItem?.title || "Select an item"}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <button 
+                      disabled={!activeItem || !user}
+                      onClick={toggleTimer}
+                      className={`flex items-center justify-center gap-2 py-4 rounded-xl font-bold transition-all ${
+                        state.status === 'running' 
+                        ? 'bg-zinc-800 text-white hover:bg-zinc-700' 
+                        : 'bg-emerald-500 text-black hover:bg-emerald-400'
+                      } disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/10`}
+                    >
+                      {state.status === 'running' ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
+                      {state.status === 'running' ? 'PAUSE' : 'START'}
+                    </button>
+                    <button 
+                      disabled={!activeItem || !user}
+                      onClick={resetTimer}
+                      className="flex items-center justify-center gap-2 py-4 rounded-xl font-bold bg-zinc-800 text-white hover:bg-zinc-700 disabled:opacity-50"
+                    >
+                      <RotateCcw className="w-5 h-5" />
+                      RESET
+                    </button>
+                  </div>
+                </div>
+
+                {/* Quick Start Combo Box */}
+                <div className="bg-zinc-900 border border-white/5 rounded-2xl p-6">
+                  <h2 className="text-sm font-mono text-zinc-500 uppercase tracking-widest mb-4">Quick Start by Number</h2>
+                  <select 
+                    disabled={!user}
+                    onChange={(e) => quickStartByNumber(parseInt(e.target.value))}
+                    className="w-full bg-zinc-950 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500 appearance-none cursor-pointer"
+                    defaultValue=""
+                  >
+                    <option value="" disabled>Select Item Number...</option>
+                    {items.map((_, i) => (
+                      <option key={i} value={i + 1}>Item #{i + 1}: {items[i].title}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Right Column: Order of Service Preview */}
+              <div className="lg:col-span-2">
+                <div className="bg-zinc-900 border border-white/5 rounded-2xl overflow-hidden">
+                  <div className="p-6 border-b border-white/5 flex items-center justify-between">
+                    <h2 className="text-sm font-mono text-zinc-500 uppercase tracking-widest">Live Order</h2>
+                    <div className="flex gap-2">
+                      <span className="text-xs bg-emerald-500/10 text-emerald-500 px-2 py-1 rounded font-bold">LIVE</span>
+                      <span className="text-xs bg-white/5 px-2 py-1 rounded text-zinc-400">{items.length} ITEMS</span>
+                    </div>
+                  </div>
+                  
+                  <div className="divide-y divide-white/5 max-h-[60vh] overflow-y-auto">
+                    {items.map((item, index) => (
+                      <div 
+                        key={item.id}
+                        className={`group flex items-center gap-4 p-5 hover:bg-white/5 transition-colors ${state.activeItemId === item.id ? 'bg-emerald-500/10 border-l-4 border-emerald-500' : 'border-l-4 border-transparent'}`}
+                      >
+                        <div className="w-8 text-zinc-600 font-mono text-sm">{index + 1}</div>
+                        <div className="flex-1">
+                          <h3 className={`font-bold uppercase tracking-tight text-lg ${state.activeItemId === item.id ? 'text-emerald-400' : 'text-white'}`}>
+                            {item.title}
+                          </h3>
+                          <div className="flex items-center gap-3 mt-1">
+                            <span className="text-xs text-zinc-500 flex items-center gap-1">
+                              <Clock className="w-3 h-3" /> {item.duration}m
+                            </span>
+                            {state.activeItemId === item.id && (
+                              <span className="text-[10px] bg-emerald-500 text-black px-1.5 py-0.5 rounded font-black animate-pulse">ACTIVE</span>
+                            )}
+                          </div>
+                        </div>
+                        
+                        <button 
+                          onClick={() => selectItem(item.id)}
+                          className={`p-3 rounded-xl transition-all ${state.activeItemId === item.id ? 'bg-emerald-500 text-black' : 'bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10'}`}
+                          title="Select for Timer"
+                        >
+                          <Play className="w-5 h-5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          ) : view === 'history' ? (
+            <motion.div
+              key="history"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="space-y-8"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-4xl font-black tracking-tight">SERVICE HISTORY</h1>
+                  <p className="text-zinc-500 mt-2">Activity logs and timestamps for all services.</p>
+                </div>
+                <button 
+                  onClick={exportLogsCSV}
+                  className="flex items-center gap-2 bg-emerald-500 text-black px-6 py-3 rounded-xl font-bold hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20"
+                >
+                  <Download className="w-5 h-5" />
+                  EXPORT CSV
+                </button>
+              </div>
+
+              <div className="bg-zinc-900 border border-white/5 rounded-2xl overflow-hidden">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-white/5 border-b border-white/5">
+                      <th className="px-6 py-4 text-xs font-mono text-zinc-500 uppercase tracking-widest">Date</th>
+                      <th className="px-6 py-4 text-xs font-mono text-zinc-500 uppercase tracking-widest">Service</th>
+                      <th className="px-6 py-4 text-xs font-mono text-zinc-500 uppercase tracking-widest">Activity</th>
+                      <th className="px-6 py-4 text-xs font-mono text-zinc-500 uppercase tracking-widest">Start</th>
+                      <th className="px-6 py-4 text-xs font-mono text-zinc-500 uppercase tracking-widest">End</th>
+                      <th className="px-6 py-4 text-xs font-mono text-zinc-500 uppercase tracking-widest">Duration</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {logs.map((log) => (
+                      <tr key={log.id} className="hover:bg-white/5 transition-colors">
+                        <td className="px-6 py-4 font-mono text-sm text-zinc-400">
+                          {new Date(log.date).toLocaleDateString()}
+                        </td>
+                        <td className="px-6 py-4 font-bold text-emerald-400 uppercase text-sm">
+                          {log.serviceType}
+                        </td>
+                        <td className="px-6 py-4 font-bold uppercase">
+                          {log.activityName}
+                        </td>
+                        <td className="px-6 py-4 font-mono text-sm">
+                          {new Date(log.startTime).toLocaleTimeString()}
+                        </td>
+                        <td className="px-6 py-4 font-mono text-sm">
+                          {new Date(log.endTime).toLocaleTimeString()}
+                        </td>
+                        <td className="px-6 py-4 font-mono text-sm text-zinc-400">
+                          {Math.floor(log.durationSeconds / 60)}m {log.durationSeconds % 60}s
+                        </td>
+                      </tr>
+                    ))}
+                    {logs.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="px-6 py-12 text-center text-zinc-500 italic">
+                          No history logs found yet. Start a service to begin recording.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.div 
+              key="setup"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="grid grid-cols-1 lg:grid-cols-3 gap-8"
+            >
+              {/* Left Column: Add New Item & Service Types */}
+              <div className="lg:col-span-1 space-y-6">
+                {/* Service Types Management */}
+                <div className="bg-zinc-900 border border-white/5 rounded-2xl p-6">
+                  <h2 className="text-sm font-mono text-zinc-500 uppercase tracking-widest mb-6">Service Types</h2>
+                  
+                  <div className="space-y-4 mb-6">
+                    {serviceTypes.map(type => (
+                      <div 
+                        key={type.id} 
+                        className={`flex items-center justify-between p-3 rounded-xl border group transition-all ${state.activeServiceTypeId === type.id ? 'bg-emerald-500/10 border-emerald-500' : 'bg-zinc-950 border-white/5'}`}
+                      >
+                        <div>
+                          <div className={`font-bold text-sm ${state.activeServiceTypeId === type.id ? 'text-emerald-400' : 'text-white'}`}>{type.name}</div>
+                          <div className="text-[10px] text-zinc-500 font-mono uppercase tracking-widest">
+                            {type.startTime} — {type.endTime} ({type.duration}m)
+                          </div>
+                        </div>
+                        <button 
+                          onClick={() => deleteServiceType(type.id)}
+                          className="p-2 text-zinc-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="space-y-3 pt-4 border-t border-white/5">
+                    <input 
+                      type="text" 
+                      value={newServiceTypeName}
+                      onChange={(e) => setNewServiceTypeName(e.target.value)}
+                      placeholder="Service Name (e.g. First Service)"
+                      className="w-full bg-zinc-950 border border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <button 
+                        onClick={() => setActivePicker({
+                          type: 'time',
+                          title: 'Set Start Time',
+                          onConfirm: (val) => setNewServiceTypeStart(val)
+                        })}
+                        className="bg-zinc-950 border border-white/10 rounded-xl px-4 py-2 text-sm text-left flex flex-col"
+                      >
+                        <span className="text-[10px] text-zinc-500 uppercase">Start Time</span>
+                        <span className="font-mono font-bold">{newServiceTypeStart}</span>
+                      </button>
+                      <button 
+                        onClick={() => setActivePicker({
+                          type: 'time',
+                          title: 'Set End Time',
+                          onConfirm: (val) => setNewServiceTypeEnd(val)
+                        })}
+                        className="bg-zinc-950 border border-white/10 rounded-xl px-4 py-2 text-sm text-left flex flex-col"
+                      >
+                        <span className="text-[10px] text-zinc-500 uppercase">End Time</span>
+                        <span className="font-mono font-bold">{newServiceTypeEnd}</span>
+                      </button>
+                    </div>
+
+                    <button 
+                      onClick={() => setActivePicker({
+                        type: 'duration',
+                        title: 'Set Total Duration',
+                        onConfirm: (val) => setNewServiceTypeDuration(parseInt(val))
+                      })}
+                      className="w-full bg-zinc-950 border border-white/10 rounded-xl px-4 py-2 text-sm text-left flex flex-col"
+                    >
+                      <span className="text-[10px] text-zinc-500 uppercase">Total Duration</span>
+                      <span className="font-mono font-bold">{newServiceTypeDuration} Minutes</span>
+                    </button>
+                    <button 
+                      onClick={addServiceType}
+                      className="w-full bg-white text-black font-bold py-2 rounded-xl hover:bg-zinc-200 transition-colors text-sm"
+                    >
+                      ADD SERVICE TYPE
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-zinc-900 border border-white/5 rounded-2xl p-6">
+                  <h2 className="text-sm font-mono text-zinc-500 uppercase tracking-widest mb-6">Add New Item</h2>
+                  
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-xs text-zinc-500 uppercase mb-1.5 block font-bold">Common Items (Combo Box)</label>
+                      <select 
+                        onChange={(e) => setNewItemTitle(e.target.value)}
+                        className="w-full bg-zinc-950 border border-white/10 rounded-xl px-4 py-2.5 focus:outline-none focus:border-emerald-500 mb-2"
+                        value={newItemTitle}
+                      >
+                        <option value="">-- Select or type below --</option>
+                        {COMMON_ITEMS.map(item => (
+                          <option key={item} value={item}>{item}</option>
+                        ))}
+                      </select>
+                      <input 
+                        type="text" 
+                        value={newItemTitle}
+                        onChange={(e) => setNewItemTitle(e.target.value)}
+                        placeholder="Or type custom title..."
+                        className="w-full bg-zinc-950 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-zinc-500 uppercase mb-1.5 block font-bold">Duration (Minutes)</label>
+                      <button 
+                        onClick={() => setActivePicker({
+                          type: 'duration',
+                          title: 'Set Item Duration',
+                          onConfirm: (val) => setNewItemDuration(parseInt(val))
+                        })}
+                        className="w-full bg-zinc-950 border border-white/10 rounded-xl px-4 py-3 text-left flex flex-col"
+                      >
+                        <span className="font-mono font-bold">{newItemDuration} Minutes</span>
+                      </button>
+                    </div>
+                    <button 
+                      onClick={addItem}
+                      className="w-full bg-emerald-500 text-black font-black py-4 rounded-xl hover:bg-emerald-400 transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20"
+                    >
+                      <Plus className="w-5 h-5" />
+                      ADD TO ORDER
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Column: Manage Order & Times */}
+              <div className="lg:col-span-2">
+                <div className="bg-zinc-900 border border-white/5 rounded-2xl overflow-hidden">
+                  <div className="p-6 border-b border-white/5 flex items-center justify-between bg-white/2">
+                    <h2 className="text-sm font-mono text-zinc-500 uppercase tracking-widest">Setup Order of Service</h2>
+                    <span className="text-xs text-zinc-500">Drag & Drop coming soon • Use arrows to reorder</span>
+                  </div>
+                  
+                  <div className="divide-y divide-white/5">
+                    {items.map((item, index) => (
+                      <div 
+                        key={item.id}
+                        className={`flex items-center gap-4 p-5 hover:bg-white/5 transition-colors group border-l-4 ${state.activeItemId === item.id ? 'bg-emerald-500/5 border-emerald-500' : 'border-transparent'}`}
+                      >
+                        <div className="flex flex-col items-center gap-1 w-8">
+                          <button 
+                            disabled={index === 0}
+                            onClick={() => moveItem(index, 'up')}
+                            className="p-1 hover:text-emerald-500 disabled:opacity-20"
+                          >
+                            <ChevronUp className="w-4 h-4" />
+                          </button>
+                          <span className="text-xs font-mono text-zinc-600">{index + 1}</span>
+                          <button 
+                            disabled={index === items.length - 1}
+                            onClick={() => moveItem(index, 'down')}
+                            className="p-1 hover:text-emerald-500 disabled:opacity-20"
+                          >
+                            <ChevronDown className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        <div className="flex-1">
+                          <input 
+                            type="text"
+                            value={item.title}
+                            onChange={(e) => updateDoc(doc(db, 'service_items', item.id), { title: e.target.value })}
+                            className={`bg-transparent border-none font-bold uppercase tracking-tight text-lg focus:ring-0 w-full p-0 ${state.activeItemId === item.id ? 'text-emerald-400' : 'text-white'}`}
+                          />
+                          <div className="flex items-center gap-4 mt-2">
+                            <div className="flex items-center gap-2 bg-zinc-950 border border-white/5 rounded-lg px-3 py-1">
+                              <Clock className="w-3 h-3 text-zinc-500" />
+                              <input 
+                                type="number"
+                                value={item.duration}
+                                onChange={(e) => updateItemDuration(item.id, parseInt(e.target.value))}
+                                className="bg-transparent border-none w-12 p-0 text-sm focus:ring-0 font-mono"
+                              />
+                              <span className="text-[10px] text-zinc-600 uppercase">mins</span>
+                            </div>
+                            {state.activeItemId === item.id && (
+                              <span className="text-[10px] bg-emerald-500 text-black px-1.5 py-0.5 rounded font-black animate-pulse">ACTIVE</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <button 
+                          onClick={() => deleteItem(item.id)}
+                          className="p-3 text-zinc-600 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all opacity-0 group-hover:opacity-100"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  {items.length === 0 && (
+                    <div className="p-20 text-center text-zinc-600">
+                      <LayoutDashboard className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                      <p>No items in the order of service yet.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </main>
+
+      {/* Footer Info */}
+      {!isFullscreen && (
+        <footer className="fixed bottom-0 left-0 right-0 h-12 border-t border-white/5 bg-zinc-950/80 backdrop-blur-md flex items-center justify-between px-6 text-[10px] text-zinc-600 uppercase tracking-[0.2em]">
+          <div>System Status: Operational</div>
+          <div className="flex gap-6">
+            <span>{currentTime.toDateString()}</span>
+            <span>Church Service Management v1.0</span>
+          </div>
+        </footer>
+      )}
+
+      {/* Global Time Picker Overlay */}
+      <TimePicker 
+        isOpen={!!activePicker}
+        onClose={() => setActivePicker(null)}
+        onConfirm={activePicker?.onConfirm || (() => {})}
+        title={activePicker?.title || ''}
+        type={activePicker?.type || 'duration'}
+      />
+    </div>
+  );
+}

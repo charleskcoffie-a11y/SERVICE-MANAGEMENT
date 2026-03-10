@@ -1,0 +1,60 @@
+{
+  "entities": {
+    "ServiceItem": {
+      "title": "Service Item",
+      "description": "An item in the order of service",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "duration": { "type": "number", "description": "Duration in minutes" },
+        "order": { "type": "number" }
+      },
+      "required": ["title", "duration", "order"]
+    },
+    "ServiceType": {
+      "title": "Service Type",
+      "description": "A type of service (e.g., First Service)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" },
+        "duration": { "type": "number", "description": "Total duration in minutes" }
+      },
+      "required": ["name", "startTime", "endTime", "duration"]
+    },
+    "ServiceState": {
+      "title": "Service State",
+      "description": "The current state of the service timer",
+      "type": "object",
+      "properties": {
+        "activeItemId": { "type": "string" },
+        "activeServiceTypeId": { "type": "string" },
+        "startTime": { "type": "number" },
+        "serviceStartTime": { "type": "number" },
+        "status": { "type": "string", "enum": ["running", "paused", "idle"] },
+        "remainingSeconds": { "type": "number" }
+      }
+    }
+  },
+  "firestore": {
+    "/service_items": {
+      "schema": "ServiceItem",
+      "description": "Collection of items in the order of service"
+    },
+    "/service_types": {
+      "schema": "ServiceType",
+      "description": "Collection of service types"
+    },
+    "/service_config/current": {
+      "schema": "ServiceState",
+      "description": "Singleton document for current service state"
+    },
+    "/service_logs": {
+      "schema": "ServiceLog",
+      "description": "Historical logs of service activities"
+    }
+  }
+}

@@ -1,0 +1,78 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && 
+        ((request.auth.token.email == "charleskcoffie@gmail.com" && request.auth.token.email_verified) ||
+         request.auth.uid == "qxZYIFIDRfR8EHYuwRoOURwoWen2");
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Service Items
+    // ===============================================================
+    match /service_items/{itemId} {
+      allow read: if true;
+      allow create: if isAdmin() && 
+        hasOnlyAllowedFields(['title', 'duration', 'order']) &&
+        request.resource.data.title is string &&
+        request.resource.data.duration is number &&
+        request.resource.data.order is number;
+      allow update: if isAdmin() &&
+        hasOnlyAllowedFields(['title', 'duration', 'order']) &&
+        (request.resource.data.title is string || !('title' in request.resource.data)) &&
+        (request.resource.data.duration is number || !('duration' in request.resource.data)) &&
+        (request.resource.data.order is number || !('order' in request.resource.data));
+      allow delete: if isAdmin();
+    }
+
+    // ===============================================================
+    // Service Types
+    // ===============================================================
+    match /service_types/{typeId} {
+      allow read: if true;
+      allow create: if isAdmin() &&
+        hasOnlyAllowedFields(['name', 'startTime', 'endTime', 'duration']) &&
+        request.resource.data.name is string &&
+        request.resource.data.startTime is string &&
+        request.resource.data.endTime is string &&
+        request.resource.data.duration is number;
+      allow update: if isAdmin() &&
+        hasOnlyAllowedFields(['name', 'startTime', 'endTime', 'duration']) &&
+        (request.resource.data.name is string || !('name' in request.resource.data)) &&
+        (request.resource.data.startTime is string || !('startTime' in request.resource.data)) &&
+        (request.resource.data.endTime is string || !('endTime' in request.resource.data)) &&
+        (request.resource.data.duration is number || !('duration' in request.resource.data));
+      allow delete: if isAdmin();
+    }
+
+    // ===============================================================
+    // Service Config/State
+    // ===============================================================
+    match /service_config/current {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /service_config/connection_test {
+      allow read: if true;
+    }
+
+    // ===============================================================
+    // Service Logs
+    // ===============================================================
+    match /service_logs/{logId} {
+      allow read, write: if isAdmin();
+    }
+  }
+}
