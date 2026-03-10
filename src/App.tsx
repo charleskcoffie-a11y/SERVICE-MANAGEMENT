@@ -47,7 +47,7 @@ import {
   User
 } from 'firebase/auth';
 import { db, auth } from './firebase';
-import { ServiceItem, ServiceState, ServiceStatus, ServiceType, ServiceLog } from './types';
+import { ServiceItem, ServiceState, ServiceStatus, ServiceType, ServiceLog, CommonItem } from './types';
 import { TimePicker } from './components/TimePicker';
 
 enum OperationType {
@@ -123,6 +123,7 @@ const COMMON_ITEMS = [
 export default function App() {
   const [items, setItems] = useState<ServiceItem[]>([]);
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
+  const [commonItems, setCommonItems] = useState<CommonItem[]>([]);
   const [logs, setLogs] = useState<ServiceLog[]>([]);
   const [state, setState] = useState<ServiceState>({
     activeItemId: null,
@@ -130,7 +131,8 @@ export default function App() {
     startTime: null,
     serviceStartTime: null,
     status: 'idle',
-    remainingSeconds: 0
+    remainingSeconds: 0,
+    timerThreshold: 120
   });
   const [user, setUser] = useState<User | null>(null);
   const [view, setView] = useState<'display' | 'control' | 'setup' | 'history'>('display');
@@ -138,11 +140,13 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [newItemTitle, setNewItemTitle] = useState('');
+  const [newItemSpeaker, setNewItemSpeaker] = useState('');
   const [newItemDuration, setNewItemDuration] = useState(5);
   const [newServiceTypeName, setNewServiceTypeName] = useState('');
   const [newServiceTypeStart, setNewServiceTypeStart] = useState('09:00 AM');
   const [newServiceTypeEnd, setNewServiceTypeEnd] = useState('11:00 AM');
   const [newServiceTypeDuration, setNewServiceTypeDuration] = useState(120);
+  const [newCommonItemTitle, setNewCommonItemTitle] = useState('');
 
   const [activePicker, setActivePicker] = useState<{
     type: 'time' | 'duration';
@@ -212,6 +216,22 @@ export default function App() {
     });
   }, []);
 
+  // Firestore sync: Common Items
+  useEffect(() => {
+    const q = query(collection(db, 'common_items'), orderBy('title', 'asc'));
+    return onSnapshot(q, (snapshot) => {
+      const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as CommonItem));
+      setCommonItems(items);
+      
+      // Seed if empty
+      if (items.length === 0 && user?.email === "charleskcoffie@gmail.com") {
+        seedCommonItems();
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'common_items');
+    });
+  }, [user]);
+
   // Firestore sync: Logs
   useEffect(() => {
     if (!user) return;
@@ -230,11 +250,32 @@ export default function App() {
       const newDoc = doc(collection(db, 'service_items'));
       batch.set(newDoc, {
         title,
+        speaker: '',
         duration: 10,
         order: index + 1
       });
     });
     await batch.commit();
+  };
+
+  const seedCommonItems = async () => {
+    const batch = writeBatch(db);
+    COMMON_ITEMS.forEach((title) => {
+      const newDoc = doc(collection(db, 'common_items'));
+      batch.set(newDoc, { title });
+    });
+    await batch.commit();
+  };
+
+  const addCommonItem = async () => {
+    if (!newCommonItemTitle) return;
+    const newDoc = doc(collection(db, 'common_items'));
+    await setDoc(newDoc, { title: newCommonItemTitle });
+    setNewCommonItemTitle('');
+  };
+
+  const deleteCommonItem = async (id: string) => {
+    await deleteDoc(doc(db, 'common_items', id));
   };
 
   const handleLogin = async () => {
@@ -263,6 +304,7 @@ export default function App() {
         date: new Date().toISOString(),
         serviceType: type?.name || 'Unknown',
         activityName: item.title,
+        speaker: item.speaker || null,
         startTime: state.startTime,
         endTime: endTime,
         durationSeconds: Math.floor((endTime - state.startTime) / 1000),
@@ -361,10 +403,12 @@ export default function App() {
     const newDoc = doc(collection(db, 'service_items'));
     await setDoc(newDoc, {
       title: newItemTitle,
+      speaker: newItemSpeaker,
       duration: newItemDuration,
       order: items.length + 1
     });
     setNewItemTitle('');
+    setNewItemSpeaker('');
   };
 
   const moveItem = async (index: number, direction: 'up' | 'down') => {
@@ -423,7 +467,7 @@ export default function App() {
   const exportLogsCSV = () => {
     if (logs.length === 0) return;
 
-    const headers = ['Date', 'Service Type', 'Activity', 'Start Time', 'End Time', 'Duration (s)', 'Total Service Duration (s)'];
+    const headers = ['Date', 'Service Type', 'Activity', 'Speaker', 'Start Time', 'End Time', 'Duration (s)', 'Total Service Duration (s)'];
     const csvContent = [
       headers.join(','),
       ...logs.map(log => {
@@ -436,6 +480,7 @@ export default function App() {
           `"${date}"`,
           `"${log.serviceType}"`,
           `"${log.activityName}"`,
+          `"${log.speaker || ''}"`,
           `"${start}"`,
           `"${end}"`,
           log.durationSeconds,
@@ -600,29 +645,42 @@ export default function App() {
                 <span className="text-emerald-500 font-mono text-lg tracking-[0.4em] uppercase opacity-70">
                   CURRENTLY PROCEEDING
                 </span>
-                <h1 className="text-6xl md:text-8xl font-black tracking-tighter mt-6 uppercase">
-                  {activeItem?.title || "NO ACTIVE ITEM"}
+                <h1 className={`text-6xl md:text-8xl font-black tracking-tighter mt-6 uppercase ${isTimeUp ? 'text-red-500 animate-pulse' : ''}`}>
+                  {isTimeUp ? "TIME IS UP" : (activeItem?.title || "NO ACTIVE ITEM")}
                 </h1>
+                {activeItem?.speaker && !isTimeUp && (
+                  <div className="mt-4 text-emerald-500/60 font-mono text-xl tracking-[0.2em] uppercase">
+                    BY: {activeItem.speaker}
+                  </div>
+                )}
               </div>
 
               {/* Big Countdown */}
-              <div className={`mt-16 font-mono tabular-nums transition-colors duration-500 ${isTimeUp || isCritical ? 'text-red-500 animate-pulse' : 'text-white'}`}>
-                <span className="text-[18vw] leading-none font-bold">
-                  {formatTime(currentRemaining)}
-                </span>
+              <div className="mt-16 min-h-[20vw] flex items-center justify-center">
+                {(currentRemaining <= (state.timerThreshold || 120) || isTimeUp || state.status === 'idle') ? (
+                  <div className={`font-mono tabular-nums transition-colors duration-500 ${isTimeUp || isCritical ? 'text-red-500 animate-pulse' : 'text-white'}`}>
+                    <span className="text-[18vw] leading-none font-bold">
+                      {formatTime(currentRemaining)}
+                    </span>
+                  </div>
+                ) : (
+                  <motion.div 
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="flex flex-col items-center gap-6"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-3 h-3 bg-emerald-500 rounded-full animate-pulse" />
+                      <span className="text-emerald-500/40 font-mono text-2xl tracking-[0.5em] uppercase font-light">
+                        Service in Progress
+                      </span>
+                    </div>
+                    <div className="text-zinc-700 font-mono text-sm tracking-widest uppercase">
+                      Timer hidden until {Math.floor((state.timerThreshold || 120) / 60)}m mark
+                    </div>
+                  </motion.div>
+                )}
               </div>
-
-              {isTimeUp && (
-                <motion.div 
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="mt-8"
-                >
-                  <span className="text-red-500 font-black text-6xl md:text-8xl tracking-[0.2em] animate-pulse uppercase">
-                    TIME IS UP
-                  </span>
-                </motion.div>
-              )}
 
               {isCritical && !isTimeUp && (
                 <motion.div 
@@ -788,6 +846,11 @@ export default function App() {
                             <span className="text-xs text-zinc-500 flex items-center gap-1">
                               <Clock className="w-3 h-3" /> {item.duration}m
                             </span>
+                            {item.speaker && (
+                              <span className="text-xs text-emerald-500/60 font-mono uppercase tracking-wider">
+                                • {item.speaker}
+                              </span>
+                            )}
                             {state.activeItemId === item.id && (
                               <span className="text-[10px] bg-emerald-500 text-black px-1.5 py-0.5 rounded font-black animate-pulse">ACTIVE</span>
                             )}
@@ -836,6 +899,7 @@ export default function App() {
                       <th className="px-6 py-4 text-xs font-mono text-zinc-500 uppercase tracking-widest">Date</th>
                       <th className="px-6 py-4 text-xs font-mono text-zinc-500 uppercase tracking-widest">Service</th>
                       <th className="px-6 py-4 text-xs font-mono text-zinc-500 uppercase tracking-widest">Activity</th>
+                      <th className="px-6 py-4 text-xs font-mono text-zinc-500 uppercase tracking-widest">Speaker</th>
                       <th className="px-6 py-4 text-xs font-mono text-zinc-500 uppercase tracking-widest">Start</th>
                       <th className="px-6 py-4 text-xs font-mono text-zinc-500 uppercase tracking-widest">End</th>
                       <th className="px-6 py-4 text-xs font-mono text-zinc-500 uppercase tracking-widest">Duration</th>
@@ -853,6 +917,9 @@ export default function App() {
                         <td className="px-6 py-4 font-bold uppercase">
                           {log.activityName}
                         </td>
+                        <td className="px-6 py-4 text-sm text-zinc-400">
+                          {log.speaker || '-'}
+                        </td>
                         <td className="px-6 py-4 font-mono text-sm">
                           {new Date(log.startTime).toLocaleTimeString()}
                         </td>
@@ -866,7 +933,7 @@ export default function App() {
                     ))}
                     {logs.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="px-6 py-12 text-center text-zinc-500 italic">
+                        <td colSpan={7} className="px-6 py-12 text-center text-zinc-500 italic">
                           No history logs found yet. Start a service to begin recording.
                         </td>
                       </tr>
@@ -976,8 +1043,8 @@ export default function App() {
                         value={newItemTitle}
                       >
                         <option value="">-- Select or type below --</option>
-                        {COMMON_ITEMS.map(item => (
-                          <option key={item} value={item}>{item}</option>
+                        {commonItems.map(item => (
+                          <option key={item.id} value={item.title}>{item.title}</option>
                         ))}
                       </select>
                       <input 
@@ -985,6 +1052,16 @@ export default function App() {
                         value={newItemTitle}
                         onChange={(e) => setNewItemTitle(e.target.value)}
                         placeholder="Or type custom title..."
+                        className="w-full bg-zinc-950 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-zinc-500 uppercase mb-1.5 block font-bold">Speaker / Lead</label>
+                      <input 
+                        type="text" 
+                        value={newItemSpeaker}
+                        onChange={(e) => setNewItemSpeaker(e.target.value)}
+                        placeholder="Name of speaker..."
                         className="w-full bg-zinc-950 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"
                       />
                     </div>
@@ -1008,6 +1085,68 @@ export default function App() {
                       <Plus className="w-5 h-5" />
                       ADD TO ORDER
                     </button>
+                  </div>
+                </div>
+
+                {/* System Settings */}
+                <div className="bg-zinc-900 border border-white/5 rounded-2xl p-6">
+                  <h2 className="text-sm font-mono text-zinc-500 uppercase tracking-widest mb-6">System Settings</h2>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-xs text-zinc-500 uppercase mb-1.5 block font-bold">Timer Display Threshold</label>
+                      <div className="flex items-center gap-3">
+                        <input 
+                          type="range" 
+                          min="30" 
+                          max="600" 
+                          step="30"
+                          value={state.timerThreshold || 120}
+                          onChange={(e) => updateServiceState({ timerThreshold: parseInt(e.target.value) })}
+                          className="flex-1 accent-emerald-500"
+                        />
+                        <span className="font-mono font-bold text-emerald-400 w-16 text-right">
+                          {Math.floor((state.timerThreshold || 120) / 60)}m
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-zinc-600 mt-2 uppercase">
+                        Timer will only appear on projection when less than this time remains.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Common Items Management */}
+                <div className="bg-zinc-900 border border-white/5 rounded-2xl p-6">
+                  <h2 className="text-sm font-mono text-zinc-500 uppercase tracking-widest mb-6">Manage Common Items</h2>
+                  <div className="space-y-4">
+                    <div className="flex gap-2">
+                      <input 
+                        type="text" 
+                        value={newCommonItemTitle}
+                        onChange={(e) => setNewCommonItemTitle(e.target.value)}
+                        placeholder="New common item..."
+                        className="flex-1 bg-zinc-950 border border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                      />
+                      <button 
+                        onClick={addCommonItem}
+                        className="bg-white text-black p-2 rounded-xl hover:bg-zinc-200 transition-colors"
+                      >
+                        <Plus className="w-5 h-5" />
+                      </button>
+                    </div>
+                    <div className="max-h-48 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                      {commonItems.map(item => (
+                        <div key={item.id} className="flex items-center justify-between bg-white/5 px-3 py-2 rounded-lg group">
+                          <span className="text-sm uppercase font-medium">{item.title}</span>
+                          <button 
+                            onClick={() => deleteCommonItem(item.id)}
+                            className="text-zinc-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1061,6 +1200,16 @@ export default function App() {
                                 className="bg-transparent border-none w-12 p-0 text-sm focus:ring-0 font-mono"
                               />
                               <span className="text-[10px] text-zinc-600 uppercase">mins</span>
+                            </div>
+                            <div className="flex items-center gap-2 bg-zinc-950 border border-white/5 rounded-lg px-3 py-1 flex-1">
+                              <span className="text-[10px] text-zinc-600 uppercase">Speaker:</span>
+                              <input 
+                                type="text"
+                                value={item.speaker || ''}
+                                onChange={(e) => updateDoc(doc(db, 'service_items', item.id), { speaker: e.target.value })}
+                                placeholder="Add speaker..."
+                                className="bg-transparent border-none flex-1 p-0 text-sm focus:ring-0 font-mono"
+                              />
                             </div>
                             {state.activeItemId === item.id && (
                               <span className="text-[10px] bg-emerald-500 text-black px-1.5 py-0.5 rounded font-black animate-pulse">ACTIVE</span>

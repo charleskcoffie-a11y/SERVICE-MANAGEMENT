@@ -1,8 +1,14 @@
+export interface CommonItem {
+  id: string;
+  title: string;
+}
+
 export interface ServiceItem {
   id: string;
   title: string;
   duration: number; // in minutes
   order: number;
+  speaker?: string;
 }
 
 export interface ServiceType {
@@ -22,6 +28,7 @@ export interface ServiceState {
   serviceStartTime: number | null; // timestamp in ms for the whole service
   status: ServiceStatus;
   remainingSeconds: number; // for the current item
+  timerThreshold?: number; // threshold in seconds to show timer
 }
 
 export interface ServiceLog {
@@ -29,6 +36,7 @@ export interface ServiceLog {
   date: string; // ISO date string
   serviceType: string;
   activityName: string;
+  speaker?: string;
   startTime: number; // timestamp
   endTime: number; // timestamp
   durationSeconds: number;
