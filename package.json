@@ -8,6 +8,8 @@
     "dev:client": "vite --port=3000 --host=0.0.0.0",
     "dev:server": "tsx server/index.ts",
     "build": "vite build",
+    "build:pages": "vite build --mode pages",
+    "pages:prepare": "npm run build:pages && node scripts/prepare-pages.mjs",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"

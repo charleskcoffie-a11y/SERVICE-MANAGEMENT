@@ -6,8 +6,9 @@ import {defineConfig, loadEnv} from 'vite';
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   const isGitHubActions = process.env.GITHUB_ACTIONS === 'true';
+  const isPagesMode = mode === 'pages';
   return {
-    base: isGitHubActions ? '/SERVICE-MANAGEMENT/' : '/',
+    base: (isGitHubActions || isPagesMode) ? '/SERVICE-MANAGEMENT/' : '/',
     plugins: [react(), tailwindcss()],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
