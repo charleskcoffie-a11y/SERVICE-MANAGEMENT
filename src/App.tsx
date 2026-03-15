@@ -276,6 +276,25 @@ export default function App() {
         const isSessionStale = !!lastActivity && (now - lastActivity) > STALE_APP_STATE_MS;
         const hasNonIdleTimerState = incoming.status !== 'idle' || !!incoming.serviceStartTime || incoming.remainingSeconds < 0;
 
+        if (!isAdminUnlocked) {
+          if ((isItemTimerStale || isServiceTimerStale || (isSessionStale && hasNonIdleTimerState)) || (incoming.status !== 'running' && incoming.remainingSeconds < 0)) {
+            setState({
+              ...incoming,
+              activeItemId: null,
+              startTime: null,
+              serviceStartTime: null,
+              status: 'idle',
+              remainingSeconds: 0,
+              updatedAt: incomingUpdatedAt || now,
+            });
+            return;
+          }
+
+          latestAppliedUpdatedAtRef.current = incomingUpdatedAt || now;
+          setState(incoming);
+          return;
+        }
+
         if ((isItemTimerStale || isServiceTimerStale || (isSessionStale && hasNonIdleTimerState)) && (now - lastAutoResetRef.current) > 5000) {
           const staleFix: Partial<ServiceState> = {};
 
@@ -321,7 +340,7 @@ export default function App() {
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'service_config/current');
     });
-  }, []);
+  }, [isAdminUnlocked]);
 
   // Firestore sync: Common Items
   useEffect(() => {
@@ -736,6 +755,10 @@ export default function App() {
   }, [state, currentTime]);
 
   useEffect(() => {
+    if (!isAdminUnlocked) {
+      return;
+    }
+
     if (state.status !== 'running') {
       autoStopHandledRef.current = false;
       return;
@@ -748,7 +771,7 @@ export default function App() {
         await updateServiceState({ status: 'idle', startTime: null, remainingSeconds: 0, activeItemId: null });
       })();
     }
-  }, [state.status, currentRemaining]);
+  }, [isAdminUnlocked, state.status, currentRemaining]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(Math.abs(seconds) / 60);
@@ -784,6 +807,10 @@ export default function App() {
   }, [activeServiceType, serviceTimeElapsed]);
 
   useEffect(() => {
+    if (!isAdminUnlocked) {
+      return;
+    }
+
     if (!state.serviceStartTime) {
       return;
     }
@@ -791,7 +818,7 @@ export default function App() {
     if (serviceRemaining <= 0) {
       void updateServiceState({ serviceStartTime: null });
     }
-  }, [state.serviceStartTime, serviceRemaining]);
+  }, [isAdminUnlocked, state.serviceStartTime, serviceRemaining]);
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-emerald-500/30">
