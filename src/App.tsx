@@ -842,10 +842,14 @@ export default function App() {
       return;
     }
 
+    if (!activeServiceType) {
+      return;
+    }
+
     if (serviceRemaining <= 0) {
       void updateServiceState({ serviceStartTime: null });
     }
-  }, [isAdminUnlocked, state.serviceStartTime, serviceRemaining]);
+  }, [isAdminUnlocked, state.serviceStartTime, serviceRemaining, activeServiceType]);
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-emerald-500/30">
