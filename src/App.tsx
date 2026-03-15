@@ -719,9 +719,9 @@ export default function App() {
   const currentRemaining = useMemo(() => {
     if (state.status === 'running' && state.startTime) {
       const elapsed = Math.floor((Date.now() - state.startTime) / 1000);
-      return state.remainingSeconds - elapsed;
+      return Math.max(0, state.remainingSeconds - elapsed);
     }
-    return state.remainingSeconds;
+    return Math.max(0, state.remainingSeconds);
   }, [state, currentTime]);
 
   useEffect(() => {
@@ -916,7 +916,7 @@ export default function App() {
                 <span className="text-emerald-500 font-mono text-lg tracking-[0.4em] uppercase opacity-70">
                   CURRENTLY PROCEEDING
                 </span>
-                <h1 className={`text-6xl md:text-8xl font-black tracking-tighter mt-6 uppercase ${isTimeUp ? 'text-red-500 animate-pulse' : ''}`}>
+                <h1 className={`text-6xl md:text-8xl font-black tracking-tighter mt-6 uppercase ${isTimeUp ? 'text-red-500' : ''}`}>
                   {isTimeUp ? "TIME IS UP" : (activeItem?.title || "NO ACTIVE ITEM")}
                 </h1>
                 {activeItem?.speaker && !isTimeUp && (
@@ -929,7 +929,7 @@ export default function App() {
               {/* Big Countdown */}
               <div className="mt-16 min-h-[20vw] flex items-center justify-center">
                 {shouldShowCountdown && (currentRemaining <= (state.timerThreshold || 120) || isTimeUp || state.status === 'idle') ? (
-                  <div className={`font-mono tabular-nums transition-colors duration-500 ${isTimeUp || isCritical ? 'text-red-500 animate-pulse' : 'text-white'}`}>
+                  <div className={`font-mono tabular-nums transition-colors duration-500 ${isTimeUp || isCritical ? 'text-red-500' : 'text-white'}`}>
                     <span className="text-[18vw] leading-none font-bold">
                       {formatTime(currentRemaining)}
                     </span>
