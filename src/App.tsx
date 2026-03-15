@@ -250,10 +250,14 @@ export default function App() {
     return onSnapshot(collection(db, 'service_types'), (snapshot) => {
       const types = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ServiceType));
       setServiceTypes(types);
+
+      if (isAdminUnlocked) {
+        void ensureDefaultServiceTypes(types);
+      }
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'service_types');
     });
-  }, []);
+  }, [isAdminUnlocked]);
 
   // Firestore sync: State
   useEffect(() => {
@@ -390,6 +394,28 @@ export default function App() {
       const newDoc = doc(collection(db, 'common_items'));
       batch.set(newDoc, { title });
     });
+    await batch.commit();
+  };
+
+  const ensureDefaultServiceTypes = async (currentTypes: ServiceType[]) => {
+    const existingNames = new Set(currentTypes.map((type) => type.name.trim().toLowerCase()));
+    const missingDefaults = DEFAULT_SERVICE_TYPES.filter((name) => !existingNames.has(name.trim().toLowerCase()));
+
+    if (missingDefaults.length === 0) {
+      return;
+    }
+
+    const batch = writeBatch(db);
+    missingDefaults.forEach((name) => {
+      const newDoc = doc(collection(db, 'service_types'));
+      batch.set(newDoc, {
+        name,
+        startTime: '09:00 AM',
+        endTime: '11:00 AM',
+        duration: 120,
+      });
+    });
+
     await batch.commit();
   };
 
