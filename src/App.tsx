@@ -466,6 +466,14 @@ export default function App() {
     }
   };
 
+  const safeRecordLog = async () => {
+    try {
+      await recordLog(Date.now());
+    } catch (error) {
+      console.error('Log write failed during timer transition, continuing state update.', error);
+    }
+  };
+
   const toggleTimer = async () => {
     if (state.status === 'running') {
       // Pause: calculate remaining time
@@ -474,7 +482,7 @@ export default function App() {
       const remaining = Math.max(0, state.remainingSeconds - elapsed);
       
       // Record log when pausing/stopping
-      await recordLog(now);
+      await safeRecordLog();
       
       await updateServiceState({ status: 'paused', remainingSeconds: remaining, startTime: null });
     } else {
@@ -485,13 +493,13 @@ export default function App() {
 
   const resetTimer = async () => {
     if (state.status === 'running' && state.startTime) {
-      await recordLog(Date.now());
+      await safeRecordLog();
     }
-    const activeItem = items.find(i => i.id === state.activeItemId);
     await updateServiceState({
       status: 'idle',
+      activeItemId: null,
       startTime: null,
-      remainingSeconds: (activeItem?.duration || 0) * 60
+      remainingSeconds: 0
     });
   };
 
@@ -501,7 +509,7 @@ export default function App() {
 
     // If there was an active item running, record it
     if (state.status === 'running' && state.startTime) {
-      await recordLog(Date.now());
+      await safeRecordLog();
     }
 
     await updateServiceState({
@@ -527,17 +535,17 @@ export default function App() {
     
     // Record final activity if running
     if (state.status === 'running' && state.startTime) {
-      await recordLog(Date.now());
+      await safeRecordLog();
     }
 
-    await updateServiceState({ serviceStartTime: null });
+    await updateServiceState({ serviceStartTime: null, startTime: null, status: 'idle', remainingSeconds: 0, activeItemId: null });
   };
 
   const stopAllTimers = async () => {
     if (!isAdminUnlocked) return;
 
     if (state.status === 'running' && state.startTime) {
-      await recordLog(Date.now());
+      await safeRecordLog();
     }
 
     await updateServiceState({
@@ -629,7 +637,7 @@ export default function App() {
     if (item) {
       // If there was an active item running, record it
       if (state.status === 'running' && state.startTime) {
-        await recordLog(Date.now());
+        await safeRecordLog();
       }
 
       await updateServiceState({
@@ -646,7 +654,7 @@ export default function App() {
     
     // If deleting active item, record it first
     if (state.activeItemId === id && state.status === 'running' && state.startTime) {
-      await recordLog(Date.now());
+      await safeRecordLog();
       await updateServiceState({ activeItemId: null, status: 'idle', startTime: null, remainingSeconds: 0 });
     }
 
@@ -1237,7 +1245,7 @@ export default function App() {
 
                   <div className="space-y-3 pt-4 border-t border-white/5">
                     <select
-                      value=""
+                      value={serviceTypeOptions.some((name) => name.toLowerCase() === newServiceTypeName.trim().toLowerCase()) ? serviceTypeOptions.find((name) => name.toLowerCase() === newServiceTypeName.trim().toLowerCase()) || '' : ''}
                       onChange={(e) => {
                         if (e.target.value) {
                           setNewServiceTypeName(e.target.value);
