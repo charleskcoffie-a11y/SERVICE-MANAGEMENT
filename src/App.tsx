@@ -155,7 +155,6 @@ export default function App() {
   const [newItemDuration, setNewItemDuration] = useState(5);
   const [newServiceTypeName, setNewServiceTypeName] = useState('');
   const [selectedServiceTypeOption, setSelectedServiceTypeOption] = useState('');
-  const [activeServiceTypeInput, setActiveServiceTypeInput] = useState('');
   const [newServiceTypeStart, setNewServiceTypeStart] = useState('09:00 AM');
   const [newServiceTypeEnd, setNewServiceTypeEnd] = useState('11:00 AM');
   const [newServiceTypeDuration, setNewServiceTypeDuration] = useState(120);
@@ -184,11 +183,6 @@ export default function App() {
       return true;
     });
   }, [serviceTypes]);
-
-  useEffect(() => {
-    const activeTypeName = serviceTypes.find((type) => type.id === state.activeServiceTypeId)?.name || '';
-    setActiveServiceTypeInput(activeTypeName);
-  }, [state.activeServiceTypeId, serviceTypes]);
 
   // Sync current time
   useEffect(() => {
@@ -604,7 +598,7 @@ export default function App() {
     });
   };
 
-  const selectServiceType = async (typeId: string | null) => {
+  const selectServiceType = async (typeId: string) => {
     if (!isAdminUnlocked) return;
     await updateServiceState({ activeServiceTypeId: typeId || null });
   };
@@ -1068,24 +1062,17 @@ export default function App() {
                   <div className="space-y-4">
                     <div>
                       <label className="text-xs text-zinc-500 uppercase mb-1.5 block">Active Service</label>
-                      <input
-                        list="active-service-type-options"
+                      <select
                         disabled={!isAdminUnlocked}
-                        value={activeServiceTypeInput}
-                        onChange={(e) => {
-                          const nextValue = e.target.value;
-                          setActiveServiceTypeInput(nextValue);
-                          const matchedType = serviceTypes.find((type) => type.name.toLowerCase() === nextValue.trim().toLowerCase());
-                          void selectServiceType(matchedType?.id || null);
-                        }}
-                        placeholder="Select Service Type..."
+                        value={state.activeServiceTypeId || ''}
+                        onChange={(e) => void selectServiceType(e.target.value)}
                         className="w-full bg-zinc-950 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"
-                      />
-                      <datalist id="active-service-type-options">
+                      >
+                        <option value="">Select Service Type...</option>
                         {serviceTypes.map((type) => (
-                          <option key={type.id} value={type.name} />
+                          <option key={type.id} value={type.id}>{type.name}</option>
                         ))}
-                      </datalist>
+                      </select>
                     </div>
 
                     <div className="flex items-center justify-between p-4 bg-zinc-950 rounded-xl border border-white/5">
