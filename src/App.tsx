@@ -124,8 +124,11 @@ const DEFAULT_SERVICE_TYPES = [
 const STALE_ITEM_TIMER_MS = 1000 * 60 * 60 * 6;
 const STALE_SERVICE_TIMER_MS = 1000 * 60 * 60 * 12;
 const STALE_APP_STATE_MS = 1000 * 60 * 60 * 6;
+const STATIC_ADMIN_PASSWORD = 'admin123';
+const STATIC_ADMIN_UNLOCK_KEY = 'service-management-admin-unlocked';
 
 export default function App() {
+  const isStaticPagesHost = typeof window !== 'undefined' && window.location.hostname.endsWith('github.io');
   const [items, setItems] = useState<ServiceItem[]>([]);
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
   const [commonItems, setCommonItems] = useState<CommonItem[]>([]);
@@ -187,6 +190,11 @@ export default function App() {
   // Check server session on startup so admin state is not controlled by client storage.
   useEffect(() => {
     const checkSession = async () => {
+      if (isStaticPagesHost) {
+        setIsAdminUnlocked(localStorage.getItem(STATIC_ADMIN_UNLOCK_KEY) === 'true');
+        return;
+      }
+
       try {
         const response = await fetch('/api/admin/session', { credentials: 'include' });
         if (!response.ok) {
@@ -202,7 +210,7 @@ export default function App() {
     };
 
     void checkSession();
-  }, []);
+  }, [isStaticPagesHost]);
 
   // Test Connection
   useEffect(() => {
@@ -370,6 +378,19 @@ export default function App() {
       return;
     }
 
+    if (isStaticPagesHost) {
+      if (adminPasswordInput.trim() === STATIC_ADMIN_PASSWORD) {
+        localStorage.setItem(STATIC_ADMIN_UNLOCK_KEY, 'true');
+        setIsAdminUnlocked(true);
+        setAdminPasswordInput('');
+      } else {
+        setLoginError('Invalid admin password.');
+        setIsAdminUnlocked(false);
+      }
+      setIsLoginLoading(false);
+      return;
+    }
+
     try {
       const response = await fetch('/api/admin/login', {
         method: 'POST',
@@ -398,6 +419,14 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    if (isStaticPagesHost) {
+      localStorage.removeItem(STATIC_ADMIN_UNLOCK_KEY);
+      setIsAdminUnlocked(false);
+      setView('display');
+      setLoginError(null);
+      return;
+    }
+
     try {
       await fetch('/api/admin/logout', { method: 'POST', credentials: 'include' });
     } catch {
@@ -696,6 +725,16 @@ export default function App() {
     }
     return 0;
   }, [activeServiceType, serviceTimeElapsed]);
+
+  useEffect(() => {
+    if (!state.serviceStartTime) {
+      return;
+    }
+
+    if (serviceRemaining <= 0) {
+      void updateServiceState({ serviceStartTime: null });
+    }
+  }, [state.serviceStartTime, serviceRemaining]);
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-emerald-500/30">
