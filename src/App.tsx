@@ -714,7 +714,7 @@ export default function App() {
     if (currentRemaining <= 0 && !autoStopHandledRef.current) {
       autoStopHandledRef.current = true;
       void (async () => {
-        await recordLog(Date.now());
+        await safeRecordLog();
         await updateServiceState({ status: 'idle', startTime: null, remainingSeconds: 0, activeItemId: null });
       })();
     }
