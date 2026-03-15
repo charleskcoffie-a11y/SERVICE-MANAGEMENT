@@ -270,7 +270,8 @@ export default function App() {
           if (isItemTimerStale || (isSessionStale && incoming.status !== 'idle')) {
             staleFix.status = 'idle';
             staleFix.startTime = null;
-            staleFix.remainingSeconds = Math.max(0, incoming.remainingSeconds || 0);
+            staleFix.remainingSeconds = 0;
+            staleFix.activeItemId = null;
           }
 
           if (isServiceTimerStale || (isSessionStale && !!incoming.serviceStartTime)) {
@@ -291,6 +292,7 @@ export default function App() {
             status: 'idle' as const,
             startTime: null,
             remainingSeconds: 0,
+            activeItemId: null,
             updatedAt: now,
           };
           lastAutoResetRef.current = now;
@@ -689,7 +691,7 @@ export default function App() {
       autoStopHandledRef.current = true;
       void (async () => {
         await recordLog(Date.now());
-        await updateServiceState({ status: 'idle', startTime: null, remainingSeconds: 0 });
+        await updateServiceState({ status: 'idle', startTime: null, remainingSeconds: 0, activeItemId: null });
       })();
     }
   }, [state.status, currentRemaining]);
@@ -705,6 +707,7 @@ export default function App() {
   const activeServiceType = serviceTypes.find(t => t.id === state.activeServiceTypeId);
   const isCritical = currentRemaining <= 60 && currentRemaining > 0;
   const isTimeUp = currentRemaining <= 0 && state.status !== 'idle';
+  const shouldShowCountdown = Boolean(activeItem) || state.status !== 'idle' || currentRemaining > 0;
 
   const servicePlannedSeconds = activeServiceType ? activeServiceType.duration * 60 : null;
 
@@ -842,7 +845,7 @@ export default function App() {
                 <div className="font-mono tabular-nums text-white bg-white/5 border border-emerald-500/40 rounded-2xl px-6 md:px-10 py-3 md:py-5 text-7xl sm:text-8xl md:text-[9rem] lg:text-[10rem] tracking-[0.08em] font-black leading-none shadow-[0_0_40px_rgba(16,185,129,0.15)]">
                   {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                 </div>
-                {state.serviceStartTime && (
+                {state.serviceStartTime && activeServiceType && serviceRemaining > 0 && (
                   <div className="mt-4 flex items-center gap-3 text-emerald-500/60 font-mono text-sm tracking-widest uppercase">
                     <span className="opacity-50">SERVICE DURATION:</span>
                     <span className="font-bold">{formatTime(serviceTimeElapsed)}</span>
@@ -851,7 +854,7 @@ export default function App() {
               </div>
 
               {/* Service Type Info */}
-              {activeServiceType && (
+              {activeServiceType && state.serviceStartTime && serviceRemaining > 0 && (
                 <div className="mb-8 flex flex-col items-center">
                   <span className="text-zinc-500 font-mono text-xs tracking-widest uppercase mb-2">SERVICE TYPE</span>
                   <div className="bg-white/5 border border-white/10 px-6 py-2 rounded-full flex items-center gap-4">
@@ -882,13 +885,13 @@ export default function App() {
 
               {/* Big Countdown */}
               <div className="mt-16 min-h-[20vw] flex items-center justify-center">
-                {(currentRemaining <= (state.timerThreshold || 120) || isTimeUp || state.status === 'idle') ? (
+                {shouldShowCountdown && (currentRemaining <= (state.timerThreshold || 120) || isTimeUp || state.status === 'idle') ? (
                   <div className={`font-mono tabular-nums transition-colors duration-500 ${isTimeUp || isCritical ? 'text-red-500 animate-pulse' : 'text-white'}`}>
                     <span className="text-[18vw] leading-none font-bold">
                       {formatTime(currentRemaining)}
                     </span>
                   </div>
-                ) : (
+                ) : shouldShowCountdown ? (
                   <motion.div 
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
@@ -904,6 +907,11 @@ export default function App() {
                       Timer hidden until {Math.floor((state.timerThreshold || 120) / 60)}m mark
                     </div>
                   </motion.div>
+                ) : (
+                  <div className="flex flex-col items-center gap-3 text-zinc-600">
+                    <span className="font-mono text-lg tracking-[0.3em] uppercase">Timer Ready</span>
+                    <span className="text-sm uppercase tracking-widest">Select an item to start timing</span>
+                  </div>
                 )}
               </div>
 
