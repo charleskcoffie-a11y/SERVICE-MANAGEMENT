@@ -154,6 +154,7 @@ export default function App() {
   const [newItemSpeaker, setNewItemSpeaker] = useState('');
   const [newItemDuration, setNewItemDuration] = useState(5);
   const [newServiceTypeName, setNewServiceTypeName] = useState('');
+  const [selectedServiceTypeOption, setSelectedServiceTypeOption] = useState('');
   const [newServiceTypeStart, setNewServiceTypeStart] = useState('09:00 AM');
   const [newServiceTypeEnd, setNewServiceTypeEnd] = useState('11:00 AM');
   const [newServiceTypeDuration, setNewServiceTypeDuration] = useState(120);
@@ -610,7 +611,8 @@ export default function App() {
         endTime: newServiceTypeEnd,
         duration: newServiceTypeDuration
       });
-      setNewServiceTypeName('');
+      setNewServiceTypeName(normalizedName);
+      setSelectedServiceTypeOption(normalizedName);
       setServiceTypeMessage('Service type added.');
     } catch (error) {
       setServiceTypeMessage('Unable to add service type. Please try again.');
@@ -1273,12 +1275,12 @@ export default function App() {
 
                   <div className="space-y-3 pt-4 border-t border-white/5">
                     <select
-                      value={serviceTypeOptions.some((name) => name.toLowerCase() === newServiceTypeName.trim().toLowerCase()) ? serviceTypeOptions.find((name) => name.toLowerCase() === newServiceTypeName.trim().toLowerCase()) || '' : ''}
+                      value={selectedServiceTypeOption}
                       onChange={(e) => {
-                        if (e.target.value) {
-                          setNewServiceTypeName(e.target.value);
-                          setServiceTypeMessage(null);
-                        }
+                        const nextValue = e.target.value;
+                        setSelectedServiceTypeOption(nextValue);
+                        setNewServiceTypeName(nextValue);
+                        setServiceTypeMessage(null);
                       }}
                       className="w-full bg-zinc-950 border border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-emerald-500"
                     >
@@ -1291,7 +1293,10 @@ export default function App() {
                       type="text" 
                       value={newServiceTypeName}
                       onChange={(e) => {
-                        setNewServiceTypeName(e.target.value);
+                        const nextValue = e.target.value;
+                        setNewServiceTypeName(nextValue);
+                        const matchedOption = serviceTypeOptions.find((name) => name.toLowerCase() === nextValue.trim().toLowerCase()) || '';
+                        setSelectedServiceTypeOption(matchedOption);
                         setServiceTypeMessage(null);
                       }}
                       placeholder="Or type a custom service type"
