@@ -26,6 +26,7 @@ export interface ServiceState {
   activeServiceTypeId: string | null;
   startTime: number | null; // timestamp in ms for the current item
   serviceStartTime: number | null; // timestamp in ms for the whole service
+  updatedAt?: number; // last state mutation timestamp (ms)
   status: ServiceStatus;
   remainingSeconds: number; // for the current item
   timerThreshold?: number; // threshold in seconds to show timer

@@ -115,6 +115,7 @@ const COMMON_ITEMS = [
 
 const STALE_ITEM_TIMER_MS = 1000 * 60 * 60 * 6;
 const STALE_SERVICE_TIMER_MS = 1000 * 60 * 60 * 12;
+const STALE_APP_STATE_MS = 1000 * 60 * 60 * 6;
 
 export default function App() {
   const [items, setItems] = useState<ServiceItem[]>([]);
@@ -126,6 +127,7 @@ export default function App() {
     activeServiceTypeId: null,
     startTime: null,
     serviceStartTime: null,
+    updatedAt: Date.now(),
     status: 'idle',
     remainingSeconds: 0,
     timerThreshold: 120
@@ -228,22 +230,42 @@ export default function App() {
         const now = Date.now();
         const isItemTimerStale = incoming.status === 'running' && !!incoming.startTime && (now - incoming.startTime) > STALE_ITEM_TIMER_MS;
         const isServiceTimerStale = !!incoming.serviceStartTime && (now - incoming.serviceStartTime) > STALE_SERVICE_TIMER_MS;
+        const lastActivity = incoming.updatedAt || incoming.startTime || incoming.serviceStartTime || 0;
+        const isSessionStale = !!lastActivity && (now - lastActivity) > STALE_APP_STATE_MS;
+        const hasNonIdleTimerState = incoming.status !== 'idle' || !!incoming.serviceStartTime || incoming.remainingSeconds < 0;
 
-        if ((isItemTimerStale || isServiceTimerStale) && (now - lastAutoResetRef.current) > 5000) {
+        if ((isItemTimerStale || isServiceTimerStale || (isSessionStale && hasNonIdleTimerState)) && (now - lastAutoResetRef.current) > 5000) {
           const staleFix: Partial<ServiceState> = {};
 
-          if (isItemTimerStale) {
+          if (isItemTimerStale || (isSessionStale && incoming.status !== 'idle')) {
             staleFix.status = 'idle';
             staleFix.startTime = null;
+            staleFix.remainingSeconds = Math.max(0, incoming.remainingSeconds || 0);
           }
 
-          if (isServiceTimerStale) {
+          if (isServiceTimerStale || (isSessionStale && !!incoming.serviceStartTime)) {
             staleFix.serviceStartTime = null;
           }
+
+          staleFix.updatedAt = now;
 
           lastAutoResetRef.current = now;
           setState({ ...incoming, ...staleFix });
           void setDoc(doc(db, 'service_config', 'current'), staleFix, { merge: true });
+          return;
+        }
+
+        if (incoming.status !== 'running' && incoming.remainingSeconds < 0) {
+          const normalized = {
+            ...incoming,
+            status: 'idle' as const,
+            startTime: null,
+            remainingSeconds: 0,
+            updatedAt: now,
+          };
+          lastAutoResetRef.current = now;
+          setState(normalized);
+          void setDoc(doc(db, 'service_config', 'current'), normalized, { merge: true });
           return;
         }
 
@@ -366,7 +388,7 @@ export default function App() {
   };
 
   const updateServiceState = async (updates: Partial<ServiceState>) => {
-    await setDoc(doc(db, 'service_config', 'current'), { ...state, ...updates }, { merge: true });
+    await setDoc(doc(db, 'service_config', 'current'), { ...state, ...updates, updatedAt: Date.now() }, { merge: true });
   };
 
   const recordLog = async (endTime: number) => {
