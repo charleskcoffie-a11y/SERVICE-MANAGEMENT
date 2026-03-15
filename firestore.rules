@@ -1,19 +1,6 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ===============================================================
-    // Helper Functions
-    // ===============================================================
-    function isAuthenticated() {
-      return request.auth != null;
-    }
-    
-    function isAdmin() {
-      return isAuthenticated() && 
-        ((request.auth.token.email == "charleskcoffie@gmail.com" && request.auth.token.email_verified) ||
-         request.auth.uid == "qxZYIFIDRfR8EHYuwRoOURwoWen2");
-    }
-
     function hasOnlyAllowedFields(fields) {
       return request.resource.data.keys().hasOnly(fields);
     }
@@ -23,17 +10,17 @@ service cloud.firestore {
     // ===============================================================
     match /service_items/{itemId} {
       allow read: if true;
-      allow create: if isAdmin() && 
+      allow create: if 
         hasOnlyAllowedFields(['title', 'duration', 'order']) &&
         request.resource.data.title is string &&
         request.resource.data.duration is number &&
         request.resource.data.order is number;
-      allow update: if isAdmin() &&
+      allow update: if
         hasOnlyAllowedFields(['title', 'duration', 'order']) &&
         (request.resource.data.title is string || !('title' in request.resource.data)) &&
         (request.resource.data.duration is number || !('duration' in request.resource.data)) &&
         (request.resource.data.order is number || !('order' in request.resource.data));
-      allow delete: if isAdmin();
+      allow delete: if true;
     }
 
     // ===============================================================
@@ -41,19 +28,19 @@ service cloud.firestore {
     // ===============================================================
     match /service_types/{typeId} {
       allow read: if true;
-      allow create: if isAdmin() &&
+      allow create: if
         hasOnlyAllowedFields(['name', 'startTime', 'endTime', 'duration']) &&
         request.resource.data.name is string &&
         request.resource.data.startTime is string &&
         request.resource.data.endTime is string &&
         request.resource.data.duration is number;
-      allow update: if isAdmin() &&
+      allow update: if
         hasOnlyAllowedFields(['name', 'startTime', 'endTime', 'duration']) &&
         (request.resource.data.name is string || !('name' in request.resource.data)) &&
         (request.resource.data.startTime is string || !('startTime' in request.resource.data)) &&
         (request.resource.data.endTime is string || !('endTime' in request.resource.data)) &&
         (request.resource.data.duration is number || !('duration' in request.resource.data));
-      allow delete: if isAdmin();
+      allow delete: if true;
     }
 
     // ===============================================================
@@ -61,7 +48,7 @@ service cloud.firestore {
     // ===============================================================
     match /service_config/current {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if true;
     }
 
     match /service_config/connection_test {
@@ -69,10 +56,18 @@ service cloud.firestore {
     }
 
     // ===============================================================
+    // Common Items
+    // ===============================================================
+    match /common_items/{itemId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // ===============================================================
     // Service Logs
     // ===============================================================
     match /service_logs/{logId} {
-      allow read, write: if isAdmin();
+      allow read, write: if true;
     }
   }
 }

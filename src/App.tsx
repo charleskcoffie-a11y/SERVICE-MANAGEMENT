@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Clock, 
   Play, 
@@ -39,13 +39,6 @@ import {
   addDoc,
   limit
 } from 'firebase/firestore';
-import { 
-  signInWithPopup, 
-  GoogleAuthProvider, 
-  onAuthStateChanged, 
-  signOut,
-  User
-} from 'firebase/auth';
 import { db, auth } from './firebase';
 import { ServiceItem, ServiceState, ServiceStatus, ServiceType, ServiceLog, CommonItem } from './types';
 import { TimePicker } from './components/TimePicker';
@@ -120,6 +113,9 @@ const COMMON_ITEMS = [
   "CLOSING PRAYER"
 ];
 
+const STALE_ITEM_TIMER_MS = 1000 * 60 * 60 * 6;
+const STALE_SERVICE_TIMER_MS = 1000 * 60 * 60 * 12;
+
 export default function App() {
   const [items, setItems] = useState<ServiceItem[]>([]);
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
@@ -134,7 +130,9 @@ export default function App() {
     remainingSeconds: 0,
     timerThreshold: 120
   });
-  const [user, setUser] = useState<User | null>(null);
+  const [isAdminUnlocked, setIsAdminUnlocked] = useState(false);
+  const [adminPasswordInput, setAdminPasswordInput] = useState('');
+  const [isLoginLoading, setIsLoginLoading] = useState(false);
   const [view, setView] = useState<'display' | 'control' | 'setup' | 'history'>('display');
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -147,12 +145,14 @@ export default function App() {
   const [newServiceTypeEnd, setNewServiceTypeEnd] = useState('11:00 AM');
   const [newServiceTypeDuration, setNewServiceTypeDuration] = useState(120);
   const [newCommonItemTitle, setNewCommonItemTitle] = useState('');
+  const [loginError, setLoginError] = useState<string | null>(null);
 
   const [activePicker, setActivePicker] = useState<{
     type: 'time' | 'duration';
     title: string;
     onConfirm: (val: string) => void;
   } | null>(null);
+  const lastAutoResetRef = useRef(0);
 
   // Sync current time
   useEffect(() => {
@@ -160,9 +160,24 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // Auth listener
+  // Check server session on startup so admin state is not controlled by client storage.
   useEffect(() => {
-    return onAuthStateChanged(auth, (u) => setUser(u));
+    const checkSession = async () => {
+      try {
+        const response = await fetch('/api/admin/session', { credentials: 'include' });
+        if (!response.ok) {
+          setIsAdminUnlocked(false);
+          return;
+        }
+
+        const data = await response.json();
+        setIsAdminUnlocked(Boolean(data.authenticated));
+      } catch {
+        setIsAdminUnlocked(false);
+      }
+    };
+
+    void checkSession();
   }, []);
 
   // Test Connection
@@ -187,13 +202,13 @@ export default function App() {
       setItems(newItems);
       
       // Seed if empty
-      if (newItems.length === 0 && user?.email === "charleskcoffie@gmail.com") {
+      if (newItems.length === 0 && isAdminUnlocked) {
         seedInitialItems();
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'service_items');
     });
-  }, [user]);
+  }, [isAdminUnlocked]);
 
   // Firestore sync: Service Types
   useEffect(() => {
@@ -209,7 +224,30 @@ export default function App() {
   useEffect(() => {
     return onSnapshot(doc(db, 'service_config', 'current'), (snapshot) => {
       if (snapshot.exists()) {
-        setState(snapshot.data() as ServiceState);
+        const incoming = snapshot.data() as ServiceState;
+        const now = Date.now();
+        const isItemTimerStale = incoming.status === 'running' && !!incoming.startTime && (now - incoming.startTime) > STALE_ITEM_TIMER_MS;
+        const isServiceTimerStale = !!incoming.serviceStartTime && (now - incoming.serviceStartTime) > STALE_SERVICE_TIMER_MS;
+
+        if ((isItemTimerStale || isServiceTimerStale) && (now - lastAutoResetRef.current) > 5000) {
+          const staleFix: Partial<ServiceState> = {};
+
+          if (isItemTimerStale) {
+            staleFix.status = 'idle';
+            staleFix.startTime = null;
+          }
+
+          if (isServiceTimerStale) {
+            staleFix.serviceStartTime = null;
+          }
+
+          lastAutoResetRef.current = now;
+          setState({ ...incoming, ...staleFix });
+          void setDoc(doc(db, 'service_config', 'current'), staleFix, { merge: true });
+          return;
+        }
+
+        setState(incoming);
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'service_config/current');
@@ -224,17 +262,17 @@ export default function App() {
       setCommonItems(items);
       
       // Seed if empty
-      if (items.length === 0 && user?.email === "charleskcoffie@gmail.com") {
+      if (items.length === 0 && isAdminUnlocked) {
         seedCommonItems();
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'common_items');
     });
-  }, [user]);
+  }, [isAdminUnlocked]);
 
   // Firestore sync: Logs
   useEffect(() => {
-    if (!user) return;
+    if (!isAdminUnlocked) return;
     const q = query(collection(db, 'service_logs'), orderBy('startTime', 'desc'), limit(100));
     return onSnapshot(q, (snapshot) => {
       const newLogs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ServiceLog));
@@ -242,7 +280,7 @@ export default function App() {
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'service_logs');
     });
-  }, [user]);
+  }, [isAdminUnlocked]);
 
   const seedInitialItems = async () => {
     const batch = writeBatch(db);
@@ -279,15 +317,53 @@ export default function App() {
   };
 
   const handleLogin = async () => {
-    const provider = new GoogleAuthProvider();
+    setLoginError(null);
+    setIsLoginLoading(true);
+
+    if (!adminPasswordInput.trim()) {
+      setLoginError('Enter the admin password.');
+      setIsLoginLoading(false);
+      return;
+    }
+
     try {
-      await signInWithPopup(auth, provider);
-    } catch (error) {
-      console.error("Login failed", error);
+      const response = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({ password: adminPasswordInput.trim() }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        setLoginError(data?.message || 'Invalid admin password.');
+        setIsAdminUnlocked(false);
+        return;
+      }
+
+      setIsAdminUnlocked(true);
+      setAdminPasswordInput('');
+    } catch {
+      setLoginError('Cannot reach auth server. Start backend with npm run dev:server.');
+      setIsAdminUnlocked(false);
+    } finally {
+      setIsLoginLoading(false);
     }
   };
 
-  const handleLogout = () => signOut(auth);
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/admin/logout', { method: 'POST', credentials: 'include' });
+    } catch {
+      // Ignore network errors and still lock UI locally.
+    }
+
+    setIsAdminUnlocked(false);
+    setView('display');
+    setLoginError(null);
+  };
 
   const updateServiceState = async (updates: Partial<ServiceState>) => {
     await setDoc(doc(db, 'service_config', 'current'), { ...state, ...updates }, { merge: true });
@@ -362,17 +438,17 @@ export default function App() {
   };
 
   const selectServiceType = async (typeId: string) => {
-    if (!user) return;
+    if (!isAdminUnlocked) return;
     await updateServiceState({ activeServiceTypeId: typeId });
   };
 
   const startService = async () => {
-    if (!user) return;
+    if (!isAdminUnlocked) return;
     await updateServiceState({ serviceStartTime: Date.now() });
   };
 
   const resetService = async () => {
-    if (!user) return;
+    if (!isAdminUnlocked) return;
     
     // Record final activity if running
     if (state.status === 'running' && state.startTime) {
@@ -412,7 +488,7 @@ export default function App() {
   };
 
   const moveItem = async (index: number, direction: 'up' | 'down') => {
-    if (!user) return;
+    if (!isAdminUnlocked) return;
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= items.length) return;
 
@@ -426,7 +502,7 @@ export default function App() {
   };
 
   const updateItemDuration = async (id: string, newDuration: number) => {
-    if (!user) return;
+    if (!isAdminUnlocked) return;
     await updateDoc(doc(db, 'service_items', id), { duration: newDuration });
     
     // If this is the active item and we're idle, update remaining time
@@ -453,7 +529,7 @@ export default function App() {
   };
 
   const deleteItem = async (id: string) => {
-    if (!user) return;
+    if (!isAdminUnlocked) return;
     
     // If deleting active item, record it first
     if (state.activeItemId === id && state.status === 'running' && state.startTime) {
@@ -563,7 +639,7 @@ export default function App() {
             >
               <LayoutDashboard className="w-5 h-5" />
             </button>
-            {user && (
+            {isAdminUnlocked && (
               <>
                 <button 
                   onClick={() => setView('history')}
@@ -584,19 +660,41 @@ export default function App() {
             
             <div className="h-6 w-px bg-white/10 mx-2" />
             
-            {user ? (
+            {isAdminUnlocked ? (
               <div className="flex items-center gap-3">
-                <img src={user.photoURL || ''} className="w-8 h-8 rounded-full border border-white/10" alt="" />
-                <button onClick={handleLogout} className="text-sm text-zinc-400 hover:text-white">Sign Out</button>
+                <span className="text-xs uppercase tracking-widest text-emerald-400">Admin</span>
+                <button onClick={handleLogout} className="text-sm text-zinc-400 hover:text-white">Lock</button>
               </div>
             ) : (
-              <button 
-                onClick={handleLogin}
-                className="flex items-center gap-2 bg-white text-black px-4 py-1.5 rounded-full text-sm font-semibold hover:bg-zinc-200 transition-colors"
-              >
-                <LogIn className="w-4 h-4" />
-                Admin Login
-              </button>
+              <div className="flex flex-col items-end gap-1">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="password"
+                    value={adminPasswordInput}
+                    onChange={(e) => setAdminPasswordInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        void handleLogin();
+                      }
+                    }}
+                    placeholder="Admin password"
+                    className="bg-zinc-900 border border-white/10 rounded-full px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500"
+                  />
+                  <button 
+                    onClick={handleLogin}
+                    disabled={isLoginLoading}
+                    className="flex items-center gap-2 bg-white text-black px-4 py-1.5 rounded-full text-sm font-semibold hover:bg-zinc-200 transition-colors"
+                  >
+                    <LogIn className="w-4 h-4" />
+                    {isLoginLoading ? 'Checking...' : 'Unlock'}
+                  </button>
+                </div>
+                {loginError && (
+                  <span className="max-w-[24rem] text-[11px] leading-4 text-red-400 text-right">
+                    {loginError}
+                  </span>
+                )}
+              </div>
             )}
           </div>
         </nav>
@@ -614,7 +712,10 @@ export default function App() {
             >
               {/* Current Wall Clock & Service Duration */}
               <div className="flex flex-col items-center mb-12">
-                <div className="text-zinc-500 font-mono text-3xl md:text-5xl tracking-[0.2em] font-light">
+                <div className="text-zinc-500 font-mono text-xs md:text-sm tracking-[0.4em] uppercase mb-3">
+                  Current Time
+                </div>
+                <div className="font-mono tabular-nums text-white bg-white/5 border border-emerald-500/40 rounded-2xl px-6 md:px-10 py-3 md:py-5 text-7xl sm:text-8xl md:text-[9rem] lg:text-[10rem] tracking-[0.08em] font-black leading-none shadow-[0_0_40px_rgba(16,185,129,0.15)]">
                   {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                 </div>
                 {state.serviceStartTime && (
@@ -723,7 +824,7 @@ export default function App() {
                     <div>
                       <label className="text-xs text-zinc-500 uppercase mb-1.5 block">Active Service</label>
                       <select 
-                        disabled={!user}
+                        disabled={!isAdminUnlocked}
                         value={state.activeServiceTypeId || ''}
                         onChange={(e) => selectServiceType(e.target.value)}
                         className="w-full bg-zinc-950 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"
@@ -745,7 +846,7 @@ export default function App() {
                       <div className="flex gap-2">
                         {!state.serviceStartTime ? (
                           <button 
-                            disabled={!state.activeServiceTypeId || !user}
+                            disabled={!state.activeServiceTypeId || !isAdminUnlocked}
                             onClick={startService}
                             className="bg-emerald-500 text-black p-2 rounded-lg hover:bg-emerald-400 disabled:opacity-50"
                             title="Start Service Session"
@@ -754,7 +855,7 @@ export default function App() {
                           </button>
                         ) : (
                           <button 
-                            disabled={!user}
+                            disabled={!isAdminUnlocked}
                             onClick={resetService}
                             className="bg-zinc-800 text-white p-2 rounded-lg hover:bg-zinc-700"
                             title="Reset Service Session"
@@ -781,7 +882,7 @@ export default function App() {
 
                   <div className="grid grid-cols-2 gap-4">
                     <button 
-                      disabled={!activeItem || !user}
+                      disabled={!activeItem || !isAdminUnlocked}
                       onClick={toggleTimer}
                       className={`flex items-center justify-center gap-2 py-4 rounded-xl font-bold transition-all ${
                         state.status === 'running' 
@@ -793,7 +894,7 @@ export default function App() {
                       {state.status === 'running' ? 'PAUSE' : 'START'}
                     </button>
                     <button 
-                      disabled={!activeItem || !user}
+                      disabled={!activeItem || !isAdminUnlocked}
                       onClick={resetTimer}
                       className="flex items-center justify-center gap-2 py-4 rounded-xl font-bold bg-zinc-800 text-white hover:bg-zinc-700 disabled:opacity-50"
                     >
@@ -807,7 +908,7 @@ export default function App() {
                 <div className="bg-zinc-900 border border-white/5 rounded-2xl p-6">
                   <h2 className="text-sm font-mono text-zinc-500 uppercase tracking-widest mb-4">Quick Start by Number</h2>
                   <select 
-                    disabled={!user}
+                    disabled={!isAdminUnlocked}
                     onChange={(e) => quickStartByNumber(parseInt(e.target.value))}
                     className="w-full bg-zinc-950 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500 appearance-none cursor-pointer"
                     defaultValue=""

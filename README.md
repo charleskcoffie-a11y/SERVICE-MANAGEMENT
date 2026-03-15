@@ -15,6 +15,14 @@ View your app in AI Studio: https://ai.studio/apps/9e4fb141-da41-4bfc-89de-59ab6
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
+2. Create `.env.local` from `.env.example` and set:
+   - `GEMINI_API_KEY`
+   - `ADMIN_PASSWORD` (password used for Admin Unlock)
+3. Run the app and auth server:
    `npm run dev`
+
+## Admin Auth Mode
+
+- Admin login is now validated by a server endpoint (`/api/admin/login`).
+- The admin password is read on the server from `ADMIN_PASSWORD`.
+- The password is no longer stored in frontend source code.
