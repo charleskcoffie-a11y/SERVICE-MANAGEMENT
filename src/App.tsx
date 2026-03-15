@@ -456,6 +456,24 @@ export default function App() {
     await setDoc(doc(db, 'service_config', 'current'), { ...updates, updatedAt: nextUpdatedAt }, { merge: true });
   };
 
+  const forceIdleState = async () => {
+    const nextUpdatedAt = Date.now();
+    const nextState: ServiceState = {
+      activeItemId: null,
+      activeServiceTypeId: state.activeServiceTypeId ?? null,
+      startTime: null,
+      serviceStartTime: null,
+      status: 'idle',
+      remainingSeconds: 0,
+      timerThreshold: state.timerThreshold || 120,
+      updatedAt: nextUpdatedAt,
+    };
+
+    latestAppliedUpdatedAtRef.current = nextUpdatedAt;
+    setState(nextState);
+    await setDoc(doc(db, 'service_config', 'current'), nextState, { merge: false });
+  };
+
   const recordLog = async (endTime: number) => {
     if (!state.activeItemId || !state.startTime) return;
     const item = items.find(i => i.id === state.activeItemId);
@@ -507,12 +525,7 @@ export default function App() {
     if (state.status === 'running' && state.startTime) {
       await safeRecordLog();
     }
-    await updateServiceState({
-      status: 'idle',
-      activeItemId: null,
-      startTime: null,
-      remainingSeconds: 0
-    });
+    await forceIdleState();
   };
 
   const selectItem = async (itemId: string) => {
@@ -550,7 +563,7 @@ export default function App() {
       await safeRecordLog();
     }
 
-    await updateServiceState({ serviceStartTime: null, startTime: null, status: 'idle', remainingSeconds: 0, activeItemId: null });
+    await forceIdleState();
   };
 
   const stopAllTimers = async () => {
@@ -560,13 +573,7 @@ export default function App() {
       await safeRecordLog();
     }
 
-    await updateServiceState({
-      activeItemId: null,
-      startTime: null,
-      serviceStartTime: null,
-      status: 'idle',
-      remainingSeconds: 0,
-    });
+    await forceIdleState();
   };
 
   const addServiceType = async () => {
