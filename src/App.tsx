@@ -113,6 +113,14 @@ const COMMON_ITEMS = [
   "CLOSING PRAYER"
 ];
 
+const DEFAULT_SERVICE_TYPES = [
+  'Divine Service',
+  'Communion Service',
+  'Harvest',
+  'Harvest Launching',
+  'Prayer Service'
+];
+
 const STALE_ITEM_TIMER_MS = 1000 * 60 * 60 * 6;
 const STALE_SERVICE_TIMER_MS = 1000 * 60 * 60 * 12;
 const STALE_APP_STATE_MS = 1000 * 60 * 60 * 6;
@@ -147,6 +155,7 @@ export default function App() {
   const [newServiceTypeEnd, setNewServiceTypeEnd] = useState('11:00 AM');
   const [newServiceTypeDuration, setNewServiceTypeDuration] = useState(120);
   const [newCommonItemTitle, setNewCommonItemTitle] = useState('');
+  const [serviceTypeMessage, setServiceTypeMessage] = useState<string | null>(null);
   const [loginError, setLoginError] = useState<string | null>(null);
 
   const [activePicker, setActivePicker] = useState<{
@@ -155,6 +164,18 @@ export default function App() {
     onConfirm: (val: string) => void;
   } | null>(null);
   const lastAutoResetRef = useRef(0);
+
+  const serviceTypeOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const merged = [...DEFAULT_SERVICE_TYPES, ...serviceTypes.map((type) => type.name)];
+
+    return merged.filter((name) => {
+      const key = name.trim().toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [serviceTypes]);
 
   // Sync current time
   useEffect(() => {
@@ -481,15 +502,37 @@ export default function App() {
   };
 
   const addServiceType = async () => {
-    if (!newServiceTypeName) return;
-    const newDoc = doc(collection(db, 'service_types'));
-    await setDoc(newDoc, {
-      name: newServiceTypeName,
-      startTime: newServiceTypeStart,
-      endTime: newServiceTypeEnd,
-      duration: newServiceTypeDuration
-    });
-    setNewServiceTypeName('');
+    if (!isAdminUnlocked) return;
+
+    const normalizedName = newServiceTypeName.trim();
+    if (!normalizedName) {
+      setServiceTypeMessage('Enter or select a service type name.');
+      return;
+    }
+
+    const alreadyExists = serviceTypes.some(
+      (type) => type.name.trim().toLowerCase() === normalizedName.toLowerCase()
+    );
+
+    if (alreadyExists) {
+      setServiceTypeMessage('Service type already exists. Please choose another name.');
+      return;
+    }
+
+    try {
+      const newDoc = doc(collection(db, 'service_types'));
+      await setDoc(newDoc, {
+        name: normalizedName,
+        startTime: newServiceTypeStart,
+        endTime: newServiceTypeEnd,
+        duration: newServiceTypeDuration
+      });
+      setNewServiceTypeName('');
+      setServiceTypeMessage('Service type added.');
+    } catch (error) {
+      setServiceTypeMessage('Unable to add service type. Please try again.');
+      console.error('Add service type failed', error);
+    }
   };
 
   const deleteServiceType = async (id: string) => {
@@ -1102,11 +1145,29 @@ export default function App() {
                   </div>
 
                   <div className="space-y-3 pt-4 border-t border-white/5">
+                    <select
+                      value=""
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          setNewServiceTypeName(e.target.value);
+                          setServiceTypeMessage(null);
+                        }
+                      }}
+                      className="w-full bg-zinc-950 border border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                    >
+                      <option value="">Select a service type...</option>
+                      {serviceTypeOptions.map((name) => (
+                        <option key={name} value={name}>{name}</option>
+                      ))}
+                    </select>
                     <input 
                       type="text" 
                       value={newServiceTypeName}
-                      onChange={(e) => setNewServiceTypeName(e.target.value)}
-                      placeholder="Service Name (e.g. First Service)"
+                      onChange={(e) => {
+                        setNewServiceTypeName(e.target.value);
+                        setServiceTypeMessage(null);
+                      }}
+                      placeholder="Or type a custom service type"
                       className="w-full bg-zinc-950 border border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-emerald-500"
                     />
                     <div className="grid grid-cols-2 gap-2">
@@ -1147,10 +1208,16 @@ export default function App() {
                     </button>
                     <button 
                       onClick={addServiceType}
+                      disabled={!isAdminUnlocked}
                       className="w-full bg-white text-black font-bold py-2 rounded-xl hover:bg-zinc-200 transition-colors text-sm"
                     >
                       ADD SERVICE TYPE
                     </button>
+                    {serviceTypeMessage && (
+                      <div className={`text-xs ${serviceTypeMessage.includes('added') ? 'text-emerald-400' : 'text-amber-400'}`}>
+                        {serviceTypeMessage}
+                      </div>
+                    )}
                   </div>
                 </div>
 
