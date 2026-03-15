@@ -169,6 +169,7 @@ export default function App() {
   const lastAutoResetRef = useRef(0);
   const autoStopHandledRef = useRef(false);
   const latestAppliedUpdatedAtRef = useRef(state.updatedAt || Date.now());
+  const forceIdleLockUntilRef = useRef(0);
 
   const serviceTypeOptions = useMemo(() => {
     const seen = new Set<string>();
@@ -260,6 +261,10 @@ export default function App() {
         const incoming = snapshot.data() as ServiceState;
         const incomingUpdatedAt = incoming.updatedAt || 0;
         if (incomingUpdatedAt > 0 && incomingUpdatedAt < latestAppliedUpdatedAtRef.current) {
+          return;
+        }
+
+        if (Date.now() < forceIdleLockUntilRef.current && incoming.status === 'running') {
           return;
         }
 
@@ -458,6 +463,7 @@ export default function App() {
 
   const forceIdleState = async () => {
     const nextUpdatedAt = Date.now();
+    forceIdleLockUntilRef.current = nextUpdatedAt + (1000 * 60 * 30);
     const nextState: ServiceState = {
       activeItemId: null,
       activeServiceTypeId: state.activeServiceTypeId ?? null,
@@ -517,6 +523,7 @@ export default function App() {
       await updateServiceState({ status: 'paused', remainingSeconds: remaining, startTime: null });
     } else {
       // Start/Resume
+      forceIdleLockUntilRef.current = 0;
       await updateServiceState({ status: 'running', startTime: Date.now() });
     }
   };
@@ -552,6 +559,7 @@ export default function App() {
 
   const startService = async () => {
     if (!isAdminUnlocked) return;
+    forceIdleLockUntilRef.current = 0;
     await updateServiceState({ serviceStartTime: Date.now() });
   };
 
@@ -659,6 +667,7 @@ export default function App() {
         await safeRecordLog();
       }
 
+      forceIdleLockUntilRef.current = 0;
       await updateServiceState({
         activeItemId: item.id,
         status: 'running',
@@ -750,7 +759,7 @@ export default function App() {
   const activeServiceType = serviceTypes.find(t => t.id === state.activeServiceTypeId);
   const isCritical = currentRemaining <= 60 && currentRemaining > 0;
   const isTimeUp = currentRemaining <= 0 && state.status !== 'idle';
-  const shouldShowCountdown = Boolean(activeItem) || state.status !== 'idle' || currentRemaining > 0;
+  const shouldShowCountdown = state.status !== 'idle' || currentRemaining > 0;
 
   const servicePlannedSeconds = activeServiceType ? activeServiceType.duration * 60 : null;
 
