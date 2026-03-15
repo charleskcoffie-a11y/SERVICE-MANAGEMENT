@@ -809,6 +809,7 @@ export default function App() {
   const activeItem = items.find(i => i.id === state.activeItemId);
   const activeServiceType = serviceTypes.find(t => t.id === state.activeServiceTypeId);
   const isCritical = currentRemaining <= 60 && currentRemaining > 0;
+  const isFinalTwoMinutes = state.status === 'running' && currentRemaining <= 120 && currentRemaining > 0;
   const isTimeUp = currentRemaining <= 0 && state.status !== 'idle';
   const shouldShowCountdown = state.status !== 'idle' || currentRemaining > 0;
 
@@ -992,28 +993,12 @@ export default function App() {
 
               {/* Big Countdown */}
               <div className="mt-16 min-h-[20vw] flex items-center justify-center">
-                {shouldShowCountdown && (currentRemaining <= (state.timerThreshold || 120) || isTimeUp || state.status === 'idle') ? (
+                {shouldShowCountdown ? (
                   <div className={`font-mono tabular-nums transition-colors duration-500 ${isTimeUp || isCritical ? 'text-red-500' : 'text-white'}`}>
-                    <span className="text-[18vw] leading-none font-bold">
+                    <span className={`text-[18vw] leading-none font-bold ${isFinalTwoMinutes ? 'animate-pulse' : ''}`}>
                       {formatTime(currentRemaining)}
                     </span>
                   </div>
-                ) : shouldShowCountdown ? (
-                  <motion.div 
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="flex flex-col items-center gap-6"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-3 h-3 bg-emerald-500 rounded-full animate-pulse" />
-                      <span className="text-emerald-500/40 font-mono text-2xl tracking-[0.5em] uppercase font-light">
-                        Service in Progress
-                      </span>
-                    </div>
-                    <div className="text-zinc-700 font-mono text-sm tracking-widest uppercase">
-                      Timer hidden until {Math.floor((state.timerThreshold || 120) / 60)}m mark
-                    </div>
-                  </motion.div>
                 ) : (
                   <div className="flex flex-col items-center gap-3 text-zinc-600">
                     <span className="font-mono text-lg tracking-[0.3em] uppercase">Timer Ready</span>
