@@ -164,6 +164,7 @@ export default function App() {
     onConfirm: (val: string) => void;
   } | null>(null);
   const lastAutoResetRef = useRef(0);
+  const autoStopHandledRef = useRef(false);
 
   const serviceTypeOptions = useMemo(() => {
     const seen = new Set<string>();
@@ -649,6 +650,21 @@ export default function App() {
     return state.remainingSeconds;
   }, [state, currentTime]);
 
+  useEffect(() => {
+    if (state.status !== 'running') {
+      autoStopHandledRef.current = false;
+      return;
+    }
+
+    if (currentRemaining <= 0 && !autoStopHandledRef.current) {
+      autoStopHandledRef.current = true;
+      void (async () => {
+        await recordLog(Date.now());
+        await updateServiceState({ status: 'idle', startTime: null, remainingSeconds: 0 });
+      })();
+    }
+  }, [state.status, currentRemaining]);
+
   const formatTime = (seconds: number) => {
     const mins = Math.floor(Math.abs(seconds) / 60);
     const secs = Math.abs(seconds) % 60;
@@ -661,18 +677,22 @@ export default function App() {
   const isCritical = currentRemaining <= 60 && currentRemaining > 0;
   const isTimeUp = currentRemaining <= 0 && state.status !== 'idle';
 
+  const servicePlannedSeconds = activeServiceType ? activeServiceType.duration * 60 : null;
+
   const serviceTimeElapsed = useMemo(() => {
     if (state.serviceStartTime) {
-      return Math.floor((Date.now() - state.serviceStartTime) / 1000);
+      const elapsed = Math.floor((Date.now() - state.serviceStartTime) / 1000);
+      if (servicePlannedSeconds !== null) {
+        return Math.min(elapsed, servicePlannedSeconds);
+      }
+      return elapsed;
     }
     return 0;
-  }, [state.serviceStartTime, currentTime]);
+  }, [state.serviceStartTime, currentTime, servicePlannedSeconds]);
 
   const serviceRemaining = useMemo(() => {
     if (activeServiceType && state.serviceStartTime) {
-      // If we have an explicit end time, we can use that for a more accurate countdown
-      // But for now, we'll stick to the duration-based logic as requested
-      return (activeServiceType.duration * 60) - serviceTimeElapsed;
+      return Math.max(0, (activeServiceType.duration * 60) - serviceTimeElapsed);
     }
     return 0;
   }, [activeServiceType, serviceTimeElapsed]);
