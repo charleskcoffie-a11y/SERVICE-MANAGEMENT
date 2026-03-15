@@ -168,6 +168,7 @@ export default function App() {
   } | null>(null);
   const lastAutoResetRef = useRef(0);
   const autoStopHandledRef = useRef(false);
+  const latestAppliedUpdatedAtRef = useRef(state.updatedAt || Date.now());
 
   const serviceTypeOptions = useMemo(() => {
     const seen = new Set<string>();
@@ -257,6 +258,11 @@ export default function App() {
     return onSnapshot(doc(db, 'service_config', 'current'), (snapshot) => {
       if (snapshot.exists()) {
         const incoming = snapshot.data() as ServiceState;
+        const incomingUpdatedAt = incoming.updatedAt || 0;
+        if (incomingUpdatedAt > 0 && incomingUpdatedAt < latestAppliedUpdatedAtRef.current) {
+          return;
+        }
+
         const now = Date.now();
         const isItemTimerStale = incoming.status === 'running' && !!incoming.startTime && (now - incoming.startTime) > STALE_ITEM_TIMER_MS;
         const isServiceTimerStale = !!incoming.serviceStartTime && (now - incoming.serviceStartTime) > STALE_SERVICE_TIMER_MS;
@@ -279,6 +285,7 @@ export default function App() {
           }
 
           staleFix.updatedAt = now;
+          latestAppliedUpdatedAtRef.current = now;
 
           lastAutoResetRef.current = now;
           setState({ ...incoming, ...staleFix });
@@ -295,12 +302,14 @@ export default function App() {
             activeItemId: null,
             updatedAt: now,
           };
+          latestAppliedUpdatedAtRef.current = now;
           lastAutoResetRef.current = now;
           setState(normalized);
           void setDoc(doc(db, 'service_config', 'current'), normalized, { merge: true });
           return;
         }
 
+        latestAppliedUpdatedAtRef.current = incomingUpdatedAt || now;
         setState(incoming);
       }
     }, (error) => {
@@ -441,7 +450,10 @@ export default function App() {
   };
 
   const updateServiceState = async (updates: Partial<ServiceState>) => {
-    await setDoc(doc(db, 'service_config', 'current'), { ...updates, updatedAt: Date.now() }, { merge: true });
+    const nextUpdatedAt = Date.now();
+    latestAppliedUpdatedAtRef.current = nextUpdatedAt;
+    setState((prev) => ({ ...prev, ...updates, updatedAt: nextUpdatedAt }));
+    await setDoc(doc(db, 'service_config', 'current'), { ...updates, updatedAt: nextUpdatedAt }, { merge: true });
   };
 
   const recordLog = async (endTime: number) => {
