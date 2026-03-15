@@ -441,7 +441,7 @@ export default function App() {
   };
 
   const updateServiceState = async (updates: Partial<ServiceState>) => {
-    await setDoc(doc(db, 'service_config', 'current'), { ...state, ...updates, updatedAt: Date.now() }, { merge: true });
+    await setDoc(doc(db, 'service_config', 'current'), { ...updates, updatedAt: Date.now() }, { merge: true });
   };
 
   const recordLog = async (endTime: number) => {
