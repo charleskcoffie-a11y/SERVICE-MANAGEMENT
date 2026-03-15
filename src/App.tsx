@@ -533,6 +533,22 @@ export default function App() {
     await updateServiceState({ serviceStartTime: null });
   };
 
+  const stopAllTimers = async () => {
+    if (!isAdminUnlocked) return;
+
+    if (state.status === 'running' && state.startTime) {
+      await recordLog(Date.now());
+    }
+
+    await updateServiceState({
+      activeItemId: null,
+      startTime: null,
+      serviceStartTime: null,
+      status: 'idle',
+      remainingSeconds: 0,
+    });
+  };
+
   const addServiceType = async () => {
     if (!isAdminUnlocked) return;
 
@@ -997,6 +1013,14 @@ export default function App() {
                         )}
                       </div>
                     </div>
+
+                    <button
+                      disabled={!isAdminUnlocked}
+                      onClick={stopAllTimers}
+                      className="w-full bg-red-500/15 border border-red-500/30 text-red-400 py-3 rounded-xl font-bold hover:bg-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      STOP ALL TIMERS
+                    </button>
                   </div>
                 </div>
 
