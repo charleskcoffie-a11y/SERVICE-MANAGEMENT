@@ -113,7 +113,8 @@ const COMMON_ITEMS = [
   "SERMON",
   "COMMUNION",
   "BENEDICTION",
-  "CLOSING PRAYER"
+  "CLOSING PRAYER",
+  "END OF SERVICE"
 ];
 
 const DEFAULT_SERVICE_TYPES = [
@@ -591,6 +592,7 @@ export default function App() {
     await forceIdleState();
   };
 
+  const [serviceComplete, setServiceComplete] = useState(false);
   const selectItem = async (itemId: string) => {
     const item = items.find(i => i.id === itemId);
     if (!item) return;
@@ -600,6 +602,14 @@ export default function App() {
       await safeRecordLog();
     }
 
+    if (item.title && item.title.trim().toUpperCase() === 'END OF SERVICE') {
+      await forceIdleState();
+      setServiceComplete(true);
+      setTimeout(() => setServiceComplete(false), 10000); // Hide after 10s
+      return;
+    }
+
+    setServiceComplete(false);
     await updateServiceState({
       activeItemId: itemId,
       status: 'idle',
@@ -785,9 +795,9 @@ export default function App() {
   const currentRemaining = useMemo(() => {
     if (state.status === 'running' && state.startTime) {
       const elapsed = Math.floor((Date.now() - state.startTime) / 1000);
-      return Math.max(0, state.remainingSeconds - elapsed);
+      return state.remainingSeconds - elapsed;
     }
-    return Math.max(0, state.remainingSeconds);
+    return state.remainingSeconds;
   }, [state, currentTime]);
 
   useEffect(() => {
@@ -800,12 +810,10 @@ export default function App() {
       return;
     }
 
+    // When time is up, just record the log once, but do NOT reset the timer or set to idle.
     if (currentRemaining <= 0 && !autoStopHandledRef.current) {
       autoStopHandledRef.current = true;
-      void (async () => {
-        await safeRecordLog();
-        await updateServiceState({ status: 'idle', startTime: null, remainingSeconds: 0, activeItemId: null });
-      })();
+      void safeRecordLog();
     }
   }, [isAdminUnlocked, state.status, currentRemaining]);
 
@@ -821,7 +829,9 @@ export default function App() {
   const isCritical = currentRemaining <= 60 && currentRemaining > 0;
   const isFinalTwoMinutes = state.status === 'running' && currentRemaining <= 120 && currentRemaining > 0;
   const isTimeUp = currentRemaining <= 0 && state.status !== 'idle';
-  const shouldShowCountdown = state.status !== 'idle' || currentRemaining > 0;
+  // Show big countdown only when <= 90s left, otherwise show small time left indicator
+  const showBigCountdown = state.status === 'running' && currentRemaining <= 90 && currentRemaining > 0;
+  const showSmallTimeLeft = state.status === 'running' && currentRemaining > 90;
 
   const servicePlannedSeconds = activeServiceType ? activeServiceType.duration * 60 : null;
 
@@ -1007,7 +1017,7 @@ export default function App() {
               )}
 
               {/* Active Activity */}
-              <div className="mb-4">
+              <div className="mb-2">
                 <span className="text-emerald-500 font-mono text-lg tracking-[0.4em] uppercase opacity-70">
                   CURRENTLY PROCEEDING
                 </span>
@@ -1021,18 +1031,28 @@ export default function App() {
                 )}
               </div>
 
-              {/* Big Countdown */}
-              <div className="mt-16 min-h-[20vw] flex items-center justify-center">
-                {shouldShowCountdown ? (
+
+              {/* Big Countdown or Service Complete */}
+              <div className="mt-4 min-h-[10vw] flex items-center justify-center">
+                {serviceComplete ? (
+                  <div className="flex flex-col items-center gap-3">
+                    <span className="font-mono text-4xl md:text-6xl lg:text-7xl text-emerald-400 font-black tracking-widest uppercase">Service Complete</span>
+                    <span className="text-lg text-zinc-400 mt-2">Thank you for worshipping with us!</span>
+                  </div>
+                ) : showBigCountdown ? (
                   <div className={`font-mono tabular-nums transition-colors duration-500 ${isTimeUp || isCritical ? 'text-red-500' : 'text-white'}`}>
                     <span className={`text-[18vw] leading-none font-bold ${isFinalTwoMinutes ? 'animate-pulse' : ''}`}>
                       {formatTime(currentRemaining)}
                     </span>
                   </div>
+                ) : showSmallTimeLeft ? (
+                  <div className="flex flex-col items-center gap-3 text-emerald-400">
+                    <span className="font-mono text-2xl tracking-[0.2em] uppercase">Time Left: {formatTime(currentRemaining)}</span>
+                  </div>
                 ) : (
                   <div className="flex flex-col items-center gap-3 text-zinc-600">
                     <span className="font-mono text-lg tracking-[0.3em] uppercase">Timer Ready</span>
-                    <span className="text-sm uppercase tracking-widest">Select an item to start timing</span>
+                    <span className="text-sm uppercase tracking-widest">Countdown will appear at 1:30</span>
                   </div>
                 )}
               </div>
