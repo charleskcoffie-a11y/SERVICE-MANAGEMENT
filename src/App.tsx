@@ -980,7 +980,7 @@ export default function App() {
                 <div className="text-zinc-500 font-mono text-xs md:text-sm tracking-[0.4em] uppercase mb-3">
                   Current Time
                 </div>
-                <div className="font-mono tabular-nums text-white bg-white/5 border border-emerald-500/40 rounded-2xl px-6 md:px-10 py-3 md:py-5 text-7xl sm:text-8xl md:text-[9rem] lg:text-[10rem] tracking-[0.08em] font-black leading-none shadow-[0_0_40px_rgba(16,185,129,0.15)]">
+                <div className="font-mono tabular-nums text-white bg-white/5 border border-emerald-500/40 rounded-2xl px-6 md:px-10 py-3 md:py-5 text-5xl sm:text-6xl md:text-7xl lg:text-8xl xl:text-9xl tracking-[0.08em] font-black leading-none shadow-[0_0_40px_rgba(16,185,129,0.15)]">
                   {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                 </div>
                 {state.serviceStartTime && activeServiceType && serviceRemaining > 0 && (
