@@ -1,0 +1,55 @@
+==================================================
+  SERVICE TIMER — TV SETUP INSTRUCTIONS
+==================================================
+
+STEP 1 — On the Xiaomi TV Stick 4K
+-----------------------------------
+Open any web browser on the TV (e.g. Google Chrome,
+Firefox, or the built-in browser).
+
+STEP 2 — Type this URL into the browser address bar:
+------------------------------------------------------
+
+  https://charleskcoffie-a11y.github.io/SERVICE-MANAGEMENT/?mode=tv
+
+  (Type it exactly as shown, including the ?mode=tv at the end)
+
+STEP 3 — What you will see on the TV:
+--------------------------------------
+- The current time (large clock)
+- The active service item currently running
+- The countdown timer
+- No buttons or controls — display only
+
+The TV updates automatically in real-time whenever
+the admin makes changes on the laptop.
+
+==================================================
+  ADMIN (LAPTOP) LINK
+==================================================
+
+Open this link on your laptop to control the service:
+
+  https://charleskcoffie-a11y.github.io/SERVICE-MANAGEMENT/
+
+Log in with your admin password to:
+- Start/stop/reset timers
+- Select the active service item
+- Set up the order of service
+- View service history
+
+TIP: Once you are logged in as Admin, click the
+"TV Link" button in the top-right corner — it
+copies the TV URL to your clipboard automatically.
+
+==================================================
+  QUICK REFERENCE
+==================================================
+
+  TV (display only):
+  https://charleskcoffie-a11y.github.io/SERVICE-MANAGEMENT/?mode=tv
+
+  Admin (full control):
+  https://charleskcoffie-a11y.github.io/SERVICE-MANAGEMENT/
+
+==================================================

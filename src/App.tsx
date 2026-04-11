@@ -21,7 +21,10 @@ import {
   AlertCircle,
   History,
   Download,
-  Calendar
+  Calendar,
+  Tv,
+  Copy,
+  Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -129,6 +132,7 @@ const STATIC_ADMIN_UNLOCK_KEY = 'service-management-admin-unlocked';
 
 export default function App() {
   const isStaticPagesHost = typeof window !== 'undefined' && window.location.hostname.endsWith('github.io');
+  const isTVMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mode') === 'tv';
   const [items, setItems] = useState<ServiceItem[]>([]);
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
   const [commonItems, setCommonItems] = useState<CommonItem[]>([]);
@@ -147,6 +151,7 @@ export default function App() {
   const [adminPasswordInput, setAdminPasswordInput] = useState('');
   const [isLoginLoading, setIsLoginLoading] = useState(false);
   const [view, setView] = useState<'display' | 'control' | 'setup' | 'history'>('display');
+  const [tvLinkCopied, setTvLinkCopied] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -193,6 +198,11 @@ export default function App() {
   // Check server session on startup so admin state is not controlled by client storage.
   useEffect(() => {
     const checkSession = async () => {
+      // TV mode is always view-only — never unlock admin regardless of session/localStorage.
+      if (isTVMode) {
+        setIsAdminUnlocked(false);
+        return;
+      }
       if (isStaticPagesHost) {
         setIsAdminUnlocked(localStorage.getItem(STATIC_ADMIN_UNLOCK_KEY) === 'true');
         return;
@@ -851,10 +861,18 @@ export default function App() {
     }
   }, [isAdminUnlocked, state.serviceStartTime, serviceRemaining, activeServiceType]);
 
+  const copyTVLink = () => {
+    const tvUrl = `${window.location.origin}${window.location.pathname}?mode=tv`;
+    navigator.clipboard.writeText(tvUrl).then(() => {
+      setTvLinkCopied(true);
+      setTimeout(() => setTvLinkCopied(false), 2000);
+    });
+  };
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-emerald-500/30">
       {/* Top Navigation */}
-      {!isFullscreen && (
+      {!isFullscreen && !isTVMode && (
         <nav className="fixed top-0 left-0 right-0 h-16 border-b border-white/5 bg-zinc-950/80 backdrop-blur-md z-50 flex items-center justify-between px-6">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center">
@@ -902,6 +920,14 @@ export default function App() {
             {isAdminUnlocked ? (
               <div className="flex items-center gap-3">
                 <span className="text-xs uppercase tracking-widest text-emerald-400">Admin</span>
+                <button
+                  onClick={copyTVLink}
+                  title="Copy TV display URL — open this link on the TV"
+                  className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-emerald-400 bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-full transition-colors"
+                >
+                  {tvLinkCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Tv className="w-3.5 h-3.5" />}
+                  {tvLinkCopied ? 'Copied!' : 'TV Link'}
+                </button>
                 <button onClick={handleLogout} className="text-sm text-zinc-400 hover:text-white">Lock</button>
               </div>
             ) : (
@@ -939,9 +965,9 @@ export default function App() {
         </nav>
       )}
 
-      <main className={`${!isFullscreen ? 'pt-24' : 'pt-0'} pb-12 px-6 max-w-7xl mx-auto min-h-screen flex flex-col justify-center`}>
+      <main className={`${(!isFullscreen && !isTVMode) ? 'pt-24' : 'pt-0'} pb-12 px-6 max-w-7xl mx-auto min-h-screen flex flex-col justify-center`}>
         <AnimatePresence mode="wait">
-          {view === 'display' ? (
+          {(isTVMode || view === 'display') ? (
             <motion.div 
               key="display"
               initial={{ opacity: 0, y: 20 }}
@@ -1023,7 +1049,7 @@ export default function App() {
               )}
 
               {/* Fullscreen Toggle for Projection */}
-              <button 
+              {!isTVMode && <button 
                 onClick={() => setIsFullscreen(!isFullscreen)}
                 className="fixed bottom-16 right-8 p-3 bg-white/5 hover:bg-white/10 rounded-full text-zinc-500 hover:text-white transition-all group"
                 title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen for Projection"}
@@ -1032,7 +1058,7 @@ export default function App() {
                 <span className="absolute right-full mr-4 top-1/2 -translate-y-1/2 bg-zinc-900 px-3 py-1 rounded text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
                   {isFullscreen ? "Show Controls" : "Fullscreen Projection Mode"}
                 </span>
-              </button>
+              </button>}
             </motion.div>
           ) : view === 'control' ? (
             <motion.div 
@@ -1605,7 +1631,7 @@ export default function App() {
       </main>
 
       {/* Footer Info */}
-      {!isFullscreen && (
+      {!isFullscreen && !isTVMode && (
         <footer className="fixed bottom-0 left-0 right-0 h-12 border-t border-white/5 bg-zinc-950/80 backdrop-blur-md flex items-center justify-between px-6 text-[10px] text-zinc-600 uppercase tracking-[0.2em]">
           <div>System Status: Operational</div>
           <div className="flex gap-6">
