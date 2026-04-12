@@ -132,6 +132,27 @@ const STATIC_ADMIN_PASSWORD = 'admin123';
 const STATIC_ADMIN_UNLOCK_KEY = 'service-management-admin-unlocked';
 
 export default function App() {
+    // TEMP: Normalize order fields for all service_items in Firestore
+    const normalizeServiceItemOrder = async () => {
+      if (!isAdminUnlocked) return;
+      const q = query(collection(db, 'service_items'), orderBy('order', 'asc'));
+      const snapshot = await getDocs(q);
+      const batch = writeBatch(db);
+      snapshot.docs.forEach((docSnap, idx) => {
+        batch.update(doc(db, 'service_items', docSnap.id), { order: idx + 1 });
+      });
+      await batch.commit();
+      alert('Order fields normalized!');
+    };
+        {/* TEMP: Admin-only Normalize Order Button */}
+        {isAdminUnlocked && (
+          <button
+            onClick={normalizeServiceItemOrder}
+            className="bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 rounded mt-4"
+          >
+            Normalize Order Fields
+          </button>
+        )}
   const isStaticPagesHost = typeof window !== 'undefined' && window.location.hostname.endsWith('github.io');
   const isTVMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mode') === 'tv';
   const [items, setItems] = useState<ServiceItem[]>([]);
