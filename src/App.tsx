@@ -713,19 +713,13 @@ export default function App() {
   const addItem = async () => {
     if (!newItemTitle) return;
     const newDoc = doc(collection(db, 'service_items'));
-    try {
-      await setDoc(newDoc, {
-        title: newItemTitle,
-        duration: newItemDuration,
-        order: items.length + 1
-      });
-      setNewItemTitle('');
-      setNewItemSpeaker('');
-      alert('Item added successfully!');
-    } catch (error) {
-      alert('Failed to add item. Please check Firestore rules and your connection.');
-      console.error('Add item failed', error);
-    }
+    await setDoc(newDoc, {
+      title: newItemTitle,
+      duration: newItemDuration,
+      order: items.length + 1
+    });
+    setNewItemTitle('');
+    setNewItemSpeaker('');
   };
 
   const moveItem = async (index: number, direction: 'up' | 'down') => {
@@ -745,7 +739,6 @@ export default function App() {
       batch.update(doc(db, 'service_items', item.id), { order: idx + 1 });
     });
     await batch.commit();
-    console.log(`moveItem called: ${direction} | index: ${index} (${items[index].title}) <-> targetIndex: ${targetIndex} (${items[targetIndex].title}) | Orders reassigned`);
   };
 
   const updateItemDuration = async (id: string, newDuration: number) => {
