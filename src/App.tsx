@@ -1530,6 +1530,12 @@ export default function App() {
                 <div className="bg-zinc-900 border border-white/5 rounded-2xl p-6">
                   <h2 className="text-sm font-mono text-zinc-500 uppercase tracking-widest mb-6">Manage Common Items</h2>
                   <div className="space-y-4">
+                    <button
+                      onClick={async () => { await seedCommonItems(); }}
+                      className="mb-2 bg-emerald-500 text-black px-4 py-2 rounded-lg font-bold hover:bg-emerald-400 transition-colors text-xs uppercase tracking-widest"
+                    >
+                      Re-seed Common Items
+                    </button>
                     <div className="flex gap-2">
                       <input 
                         type="text" 
