@@ -384,11 +384,6 @@ export default function App() {
     return onSnapshot(q, (snapshot) => {
       const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as CommonItem));
       setCommonItems(items);
-      
-      // Seed if empty
-      if (items.length === 0 && isAdminUnlocked) {
-        seedCommonItems();
-      }
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'common_items');
     });
@@ -421,10 +416,15 @@ export default function App() {
   };
 
   const seedCommonItems = async () => {
+    // Prevent duplicates: fetch existing titles
+    const snapshot = await getDocs(collection(db, 'common_items'));
+    const existingTitles = new Set(snapshot.docs.map(doc => doc.data().title?.trim().toLowerCase()));
     const batch = writeBatch(db);
     COMMON_ITEMS.forEach((title) => {
-      const newDoc = doc(collection(db, 'common_items'));
-      batch.set(newDoc, { title });
+      if (!existingTitles.has(title.trim().toLowerCase())) {
+        const newDoc = doc(collection(db, 'common_items'));
+        batch.set(newDoc, { title });
+      }
     });
     await batch.commit();
   };
