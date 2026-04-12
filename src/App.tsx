@@ -694,10 +694,8 @@ export default function App() {
     const newDoc = doc(collection(db, 'service_items'));
     await setDoc(newDoc, {
       title: newItemTitle,
-      speaker: newItemSpeaker,
       duration: newItemDuration,
-      order: items.length + 1,
-      createdAt: Date.now() // ensure uniqueness
+      order: items.length + 1
     });
     setNewItemTitle('');
     setNewItemSpeaker('');

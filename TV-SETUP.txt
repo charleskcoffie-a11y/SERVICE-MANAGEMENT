@@ -33,10 +33,7 @@ Open this link on your laptop to control the service:
   https://charleskcoffie-a11y.github.io/SERVICE-MANAGEMENT/
 
 Log in with your admin password to:
-- Start/stop/reset timers
-- Select the active service item
-- Set up the order of service
-- View service history
+  (be sure to include the benediction as the final item)
 
 TIP: Once you are logged in as Admin, click the
 "TV Link" button in the top-right corner — it
