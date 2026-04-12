@@ -713,13 +713,19 @@ export default function App() {
   const addItem = async () => {
     if (!newItemTitle) return;
     const newDoc = doc(collection(db, 'service_items'));
-    await setDoc(newDoc, {
-      title: newItemTitle,
-      duration: newItemDuration,
-      order: items.length + 1
-    });
-    setNewItemTitle('');
-    setNewItemSpeaker('');
+    try {
+      await setDoc(newDoc, {
+        title: newItemTitle,
+        duration: newItemDuration,
+        order: items.length + 1
+      });
+      setNewItemTitle('');
+      setNewItemSpeaker('');
+      alert('Item added successfully!');
+    } catch (error) {
+      alert('Failed to add item. Please check Firestore rules and your connection.');
+      console.error('Add item failed', error);
+    }
   };
 
   const moveItem = async (index: number, direction: 'up' | 'down') => {
@@ -727,15 +733,19 @@ export default function App() {
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= items.length) return;
 
-    const item1 = items[index];
-    const item2 = items[targetIndex];
+    // Swap items in a new array
+    const newItems = [...items];
+    const temp = newItems[index];
+    newItems[index] = newItems[targetIndex];
+    newItems[targetIndex] = temp;
 
-    console.log(`moveItem called: ${direction} | index: ${index} (${item1.title}) <-> targetIndex: ${targetIndex} (${item2.title})`);
-
+    // Reassign order fields sequentially
     const batch = writeBatch(db);
-    batch.update(doc(db, 'service_items', item1.id), { order: item2.order });
-    batch.update(doc(db, 'service_items', item2.id), { order: item1.order });
+    newItems.forEach((item, idx) => {
+      batch.update(doc(db, 'service_items', item.id), { order: idx + 1 });
+    });
     await batch.commit();
+    console.log(`moveItem called: ${direction} | index: ${index} (${items[index].title}) <-> targetIndex: ${targetIndex} (${items[targetIndex].title}) | Orders reassigned`);
   };
 
   const updateItemDuration = async (id: string, newDuration: number) => {
