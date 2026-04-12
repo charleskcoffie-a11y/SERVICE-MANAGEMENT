@@ -696,7 +696,8 @@ export default function App() {
       title: newItemTitle,
       speaker: newItemSpeaker,
       duration: newItemDuration,
-      order: items.length + 1
+      order: items.length + 1,
+      createdAt: Date.now() // ensure uniqueness
     });
     setNewItemTitle('');
     setNewItemSpeaker('');
