@@ -730,6 +730,8 @@ export default function App() {
     const item1 = items[index];
     const item2 = items[targetIndex];
 
+    console.log(`moveItem called: ${direction} | index: ${index} (${item1.title}) <-> targetIndex: ${targetIndex} (${item2.title})`);
+
     const batch = writeBatch(db);
     batch.update(doc(db, 'service_items', item1.id), { order: item2.order });
     batch.update(doc(db, 'service_items', item2.id), { order: item1.order });
