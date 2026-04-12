@@ -831,8 +831,8 @@ export default function App() {
   const isFinalTwoMinutes = state.status === 'running' && currentRemaining <= 120 && currentRemaining > 0;
   const isTimeUp = currentRemaining <= 0 && state.status !== 'idle';
   // Show big countdown only when <= 90s left, otherwise show small time left indicator
-  const showBigCountdown = state.status === 'running' && currentRemaining <= 90 && currentRemaining > 0;
-  const showSmallTimeLeft = state.status === 'running' && currentRemaining > 90;
+  // Always show countdown when running
+  const showCountdown = state.status === 'running' && currentRemaining !== null;
 
   const servicePlannedSeconds = activeServiceType ? activeServiceType.duration * 60 : null;
 
@@ -1040,20 +1040,15 @@ export default function App() {
                     <span className="font-mono text-4xl md:text-6xl lg:text-7xl text-emerald-400 font-black tracking-widest uppercase">Service Complete</span>
                     <span className="text-lg text-zinc-400 mt-2">Thank you for worshipping with us!</span>
                   </div>
-                ) : showBigCountdown ? (
+                ) : showCountdown ? (
                   <div className={`font-mono tabular-nums transition-colors duration-500 ${isTimeUp || isCritical ? 'text-red-500' : 'text-white'}`}>
                     <span className={`text-[18vw] leading-none font-bold ${isFinalTwoMinutes ? 'animate-pulse' : ''}`}>
                       {formatTime(currentRemaining)}
                     </span>
                   </div>
-                ) : showSmallTimeLeft ? (
-                  <div className="flex flex-col items-center gap-3 text-emerald-400">
-                    <span className="font-mono text-2xl tracking-[0.2em] uppercase">Time Left: {formatTime(currentRemaining)}</span>
-                  </div>
                 ) : (
                   <div className="flex flex-col items-center gap-3 text-zinc-600">
                     <span className="font-mono text-lg tracking-[0.3em] uppercase">Timer Ready</span>
-                    <span className="text-sm uppercase tracking-widest">Countdown will appear at 1:30</span>
                   </div>
                 )}
               </div>
