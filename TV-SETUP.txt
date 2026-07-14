@@ -24,6 +24,16 @@ STEP 3 — What you will see on the TV:
 The TV updates automatically in real-time whenever
 the admin makes changes on the laptop.
 
+If you are opening the app for St Pauls Baltemore,
+use the same base URL with the society name attached:
+
+  https://charleskcoffie-a11y.github.io/SERVICE-MANAGEMENT/?mode=tv&society=St%20Pauls%20Baltemore
+
+For GMCT, you can keep using the original link,
+or use the explicit society version:
+
+  https://charleskcoffie-a11y.github.io/SERVICE-MANAGEMENT/?mode=tv&society=GMCT
+
 ==================================================
   ADMIN (LAPTOP) LINK
 ==================================================
@@ -31,6 +41,16 @@ the admin makes changes on the laptop.
 Open this link on your laptop to control the service:
 
   https://charleskcoffie-a11y.github.io/SERVICE-MANAGEMENT/
+
+For St Pauls Baltemore, use the same link and select
+the society in the login box, or open this preview URL:
+
+  https://charleskcoffie-a11y.github.io/SERVICE-MANAGEMENT/?society=St%20Pauls%20Baltemore
+
+For GMCT, the original link still works, or you can
+use the explicit society URL:
+
+  https://charleskcoffie-a11y.github.io/SERVICE-MANAGEMENT/?society=GMCT
 
 Log in with your admin password to:
   (be sure to include the benediction as the final item)
@@ -45,6 +65,12 @@ copies the TV URL to your clipboard automatically.
 
   TV (display only):
   https://charleskcoffie-a11y.github.io/SERVICE-MANAGEMENT/?mode=tv
+
+  St Pauls preview:
+  https://charleskcoffie-a11y.github.io/SERVICE-MANAGEMENT/?mode=tv&society=St%20Pauls%20Baltemore
+
+  GMCT preview:
+  https://charleskcoffie-a11y.github.io/SERVICE-MANAGEMENT/?mode=tv&society=GMCT
 
   Admin (full control):
   https://charleskcoffie-a11y.github.io/SERVICE-MANAGEMENT/

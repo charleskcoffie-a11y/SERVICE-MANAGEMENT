@@ -128,31 +128,62 @@ const DEFAULT_SERVICE_TYPES = [
 const STALE_ITEM_TIMER_MS = 1000 * 60 * 60 * 6;
 const STALE_SERVICE_TIMER_MS = 1000 * 60 * 60 * 12;
 const STALE_APP_STATE_MS = 1000 * 60 * 60 * 6;
-const STATIC_ADMIN_PASSWORD = 'admin123';
+const DEFAULT_SOCIETIES = ['GMCT', 'St Pauls Baltemore'];
+const viteEnv = import.meta as ImportMeta & {
+  env?: {
+    VITE_MASTER_ADMIN_PASSWORD?: string;
+    VITE_SOCIETY_ADMIN_PASSWORDS_JSON?: string;
+  };
+};
+const STATIC_MASTER_PASSWORD = viteEnv.env?.VITE_MASTER_ADMIN_PASSWORD || 'admin123';
+const STATIC_SOCIETY_PASSWORDS = parseSocietyPasswordConfig(viteEnv.env?.VITE_SOCIETY_ADMIN_PASSWORDS_JSON);
+const STATIC_ADMIN_SESSION_KEY = 'service-management-admin-session';
+const STATIC_SELECTED_SOCIETY_KEY = 'service-management-selected-society';
 const STATIC_ADMIN_UNLOCK_KEY = 'service-management-admin-unlocked';
 
+type AdminRole = 'master' | 'society';
+
+interface AdminSessionSnapshot {
+  role: AdminRole;
+  society: string | null;
+}
+
+function parseSocietyPasswordConfig(rawValue: string | undefined): Record<string, string> {
+  if (!rawValue) return {};
+
+  try {
+    const parsed = JSON.parse(rawValue) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>)
+        .map(([society, password]) => [society.trim(), String(password ?? '').trim()] as const)
+        .filter(([society, password]) => society.length > 0 && password.length > 0)
+    );
+  } catch {
+    return {};
+  }
+}
+
+function normalizeSocietyName(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function slugifySocietyName(value: string): string {
+  return normalizeSocietyName(value)
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function resolveSocietyName(value: string, options: string[]): string {
+  const normalizedValue = normalizeSocietyName(value);
+  const match = options.find((option) => normalizeSocietyName(option) === normalizedValue);
+  return match || value.trim();
+}
+
 export default function App() {
-    // TEMP: Normalize order fields for all service_items in Firestore
-    const normalizeServiceItemOrder = async () => {
-      if (!isAdminUnlocked) return;
-      const q = query(collection(db, 'service_items'), orderBy('order', 'asc'));
-      const snapshot = await getDocs(q);
-      const batch = writeBatch(db);
-      snapshot.docs.forEach((docSnap, idx) => {
-        batch.update(doc(db, 'service_items', docSnap.id), { order: idx + 1 });
-      });
-      await batch.commit();
-      alert('Order fields normalized!');
-    };
-        {/* TEMP: Admin-only Normalize Order Button */}
-        {isAdminUnlocked && (
-          <button
-            onClick={normalizeServiceItemOrder}
-            className="bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 rounded mt-4"
-          >
-            Normalize Order Fields
-          </button>
-        )}
   const isStaticPagesHost = typeof window !== 'undefined' && window.location.hostname.endsWith('github.io');
   const isTVMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mode') === 'tv';
   const [items, setItems] = useState<ServiceItem[]>([]);
@@ -170,8 +201,12 @@ export default function App() {
     timerThreshold: 120
   });
   const [isAdminUnlocked, setIsAdminUnlocked] = useState(false);
+  const [adminRole, setAdminRole] = useState<AdminRole | null>(null);
   const [adminPasswordInput, setAdminPasswordInput] = useState('');
   const [isLoginLoading, setIsLoginLoading] = useState(false);
+  const [loginMode, setLoginMode] = useState<'society' | 'master'>('society');
+  const [availableSocieties, setAvailableSocieties] = useState<string[]>(DEFAULT_SOCIETIES);
+  const [selectedSociety, setSelectedSociety] = useState(DEFAULT_SOCIETIES[0]);
   const [view, setView] = useState<'display' | 'control' | 'setup' | 'history'>('display');
   const [tvLinkCopied, setTvLinkCopied] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -188,6 +223,29 @@ export default function App() {
   const [newCommonItemTitle, setNewCommonItemTitle] = useState('');
   const [serviceTypeMessage, setServiceTypeMessage] = useState<string | null>(null);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const societyNamespace = useMemo(() => {
+    if (normalizeSocietyName(selectedSociety) === 'gmct') {
+      return null;
+    }
+
+    return slugifySocietyName(selectedSociety);
+  }, [selectedSociety]);
+
+  const scopeCollection = (...segments: string[]) => {
+    const pathSegments = societyNamespace
+      ? ['societies', societyNamespace, ...segments]
+      : segments;
+
+    return (collection as any)(db, ...pathSegments);
+  };
+
+  const scopeDoc = (...segments: string[]) => {
+    const pathSegments = societyNamespace
+      ? ['societies', societyNamespace, ...segments]
+      : segments;
+
+    return (doc as any)(db, ...pathSegments);
+  };
 
   const [activePicker, setActivePicker] = useState<{
     type: 'time' | 'duration';
@@ -217,16 +275,102 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const societyFromQuery = new URLSearchParams(window.location.search).get('society')?.trim();
+    const societyFromStorage = localStorage.getItem(STATIC_SELECTED_SOCIETY_KEY)?.trim();
+    const initialSociety = societyFromQuery || societyFromStorage;
+
+    if (initialSociety) {
+      setSelectedSociety(initialSociety);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(STATIC_SELECTED_SOCIETY_KEY, selectedSociety);
+  }, [selectedSociety]);
+
+  useEffect(() => {
+    if (isTVMode) {
+      setIsAdminUnlocked(false);
+      setAdminRole(null);
+      return;
+    }
+
+    if (!isStaticPagesHost) {
+      return;
+    }
+
+    const storedSessionRaw = localStorage.getItem(STATIC_ADMIN_SESSION_KEY);
+    if (!storedSessionRaw) {
+      setIsAdminUnlocked(false);
+      setAdminRole(null);
+      return;
+    }
+
+    try {
+      const storedSession = JSON.parse(storedSessionRaw) as Partial<AdminSessionSnapshot>;
+      const sessionRole = storedSession.role === 'master' ? 'master' : 'society';
+      const sessionSociety = typeof storedSession.society === 'string' ? storedSession.society : null;
+      const matchesSelectedSociety = sessionRole === 'master' || normalizeSocietyName(sessionSociety || '') === normalizeSocietyName(selectedSociety);
+
+      setAdminRole(sessionRole);
+      setIsAdminUnlocked(matchesSelectedSociety);
+      if (sessionRole === 'society' && sessionSociety) {
+        setSelectedSociety(sessionSociety);
+      }
+    } catch {
+      localStorage.removeItem(STATIC_ADMIN_SESSION_KEY);
+      setIsAdminUnlocked(false);
+      setAdminRole(null);
+    }
+  }, [isStaticPagesHost, isTVMode, selectedSociety]);
+
+  // Check server session on startup so admin state is not controlled by client storage.
+  useEffect(() => {
+    const loadSocieties = async () => {
+      if (isStaticPagesHost) {
+        const combinedSocieties = Array.from(
+          new Set([...DEFAULT_SOCIETIES, ...Object.keys(STATIC_SOCIETY_PASSWORDS)])
+        );
+        setAvailableSocieties(combinedSocieties.length > 0 ? combinedSocieties : DEFAULT_SOCIETIES);
+        setSelectedSociety((current) => resolveSocietyName(current, combinedSocieties.length > 0 ? combinedSocieties : DEFAULT_SOCIETIES));
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/admin/societies', { credentials: 'include' });
+        if (!response.ok) {
+          setAvailableSocieties(DEFAULT_SOCIETIES);
+          return;
+        }
+
+        const data = await response.json();
+        const societies = Array.isArray(data.societies) && data.societies.length > 0
+          ? data.societies.filter((society: unknown): society is string => typeof society === 'string' && society.trim().length > 0)
+          : DEFAULT_SOCIETIES;
+        setAvailableSocieties(societies);
+        setSelectedSociety((current) => resolveSocietyName(current, societies));
+      } catch {
+        setAvailableSocieties(DEFAULT_SOCIETIES);
+      }
+    };
+
+    void loadSocieties();
+  }, [isStaticPagesHost]);
+
   // Check server session on startup so admin state is not controlled by client storage.
   useEffect(() => {
     const checkSession = async () => {
-      // TV mode is always view-only — never unlock admin regardless of session/localStorage.
       if (isTVMode) {
         setIsAdminUnlocked(false);
+        setAdminRole(null);
         return;
       }
+
       if (isStaticPagesHost) {
-        setIsAdminUnlocked(localStorage.getItem(STATIC_ADMIN_UNLOCK_KEY) === 'true');
         return;
       }
 
@@ -234,24 +378,30 @@ export default function App() {
         const response = await fetch('/api/admin/session', { credentials: 'include' });
         if (!response.ok) {
           setIsAdminUnlocked(false);
+          setAdminRole(null);
           return;
         }
 
         const data = await response.json();
         setIsAdminUnlocked(Boolean(data.authenticated));
+        setAdminRole(data.authenticated ? data.role || null : null);
+        if (typeof data.society === 'string' && data.society.trim()) {
+          setSelectedSociety(data.society.trim());
+        }
       } catch {
         setIsAdminUnlocked(false);
+        setAdminRole(null);
       }
     };
 
     void checkSession();
-  }, [isStaticPagesHost]);
+  }, [isStaticPagesHost, isTVMode]);
 
   // Test Connection
   useEffect(() => {
     const testConnection = async () => {
       try {
-        await getDocFromServer(doc(db, 'service_config', 'connection_test'));
+        await getDocFromServer(scopeDoc('service_config', 'connection_test'));
       } catch (error) {
         if (error instanceof Error && error.message.includes('the client is offline')) {
           console.error("Please check your Firebase configuration. The client is offline.");
@@ -259,41 +409,47 @@ export default function App() {
       }
     };
     testConnection();
-  }, []);
+  }, [societyNamespace]);
 
   // Firestore sync: Items
   useEffect(() => {
-    const q = query(collection(db, 'service_items'), orderBy('order', 'asc'));
-    return onSnapshot(q, (snapshot) => {
-      const newItems = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ServiceItem));
+    const q = query(scopeCollection('service_items'), orderBy('order', 'asc'));
+    return onSnapshot(q, (snapshot: any) => {
+      const newItems = snapshot.docs.map((doc: any) => ({
+        id: doc.id,
+        ...(doc.data() as Record<string, unknown>),
+      } as ServiceItem));
       setItems(newItems);
       
       // Seed if empty
       if (newItems.length === 0 && isAdminUnlocked) {
         seedInitialItems();
       }
-    }, (error) => {
+    }, (error: any) => {
       handleFirestoreError(error, OperationType.LIST, 'service_items');
     });
-  }, [isAdminUnlocked]);
+  }, [isAdminUnlocked, societyNamespace]);
 
   // Firestore sync: Service Types
   useEffect(() => {
-    return onSnapshot(collection(db, 'service_types'), (snapshot) => {
-      const types = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ServiceType));
+    return onSnapshot(scopeCollection('service_types'), (snapshot: any) => {
+      const types = snapshot.docs.map((doc: any) => ({
+        id: doc.id,
+        ...(doc.data() as Record<string, unknown>),
+      } as ServiceType));
       setServiceTypes(types);
 
       if (isAdminUnlocked) {
         void ensureDefaultServiceTypes(types);
       }
-    }, (error) => {
+    }, (error: any) => {
       handleFirestoreError(error, OperationType.LIST, 'service_types');
     });
-  }, [isAdminUnlocked]);
+  }, [isAdminUnlocked, societyNamespace]);
 
   // Firestore sync: State
   useEffect(() => {
-    return onSnapshot(doc(db, 'service_config', 'current'), (snapshot) => {
+    return onSnapshot(scopeDoc('service_config', 'current'), (snapshot: any) => {
       if (snapshot.exists()) {
         const incoming = snapshot.data() as ServiceState;
         const incomingUpdatedAt = incoming.updatedAt || 0;
@@ -350,7 +506,7 @@ export default function App() {
 
           lastAutoResetRef.current = now;
           setState({ ...incoming, ...staleFix });
-          void setDoc(doc(db, 'service_config', 'current'), staleFix, { merge: true });
+          void setDoc(scopeDoc('service_config', 'current'), staleFix, { merge: true });
           return;
         }
 
@@ -366,45 +522,51 @@ export default function App() {
           latestAppliedUpdatedAtRef.current = now;
           lastAutoResetRef.current = now;
           setState(normalized);
-          void setDoc(doc(db, 'service_config', 'current'), normalized, { merge: true });
+          void setDoc(scopeDoc('service_config', 'current'), normalized, { merge: true });
           return;
         }
 
         latestAppliedUpdatedAtRef.current = incomingUpdatedAt || now;
         setState(incoming);
       }
-    }, (error) => {
+    }, (error: any) => {
       handleFirestoreError(error, OperationType.GET, 'service_config/current');
     });
-  }, [isAdminUnlocked]);
+  }, [isAdminUnlocked, societyNamespace]);
 
   // Firestore sync: Common Items
   useEffect(() => {
-    const q = query(collection(db, 'common_items'), orderBy('title', 'asc'));
-    return onSnapshot(q, (snapshot) => {
-      const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as CommonItem));
+    const q = query(scopeCollection('common_items'), orderBy('title', 'asc'));
+    return onSnapshot(q, (snapshot: any) => {
+      const items = snapshot.docs.map((doc: any) => ({
+        id: doc.id,
+        ...(doc.data() as Record<string, unknown>),
+      } as CommonItem));
       setCommonItems(items);
-    }, (error) => {
+    }, (error: any) => {
       handleFirestoreError(error, OperationType.LIST, 'common_items');
     });
-  }, [isAdminUnlocked]);
+  }, [isAdminUnlocked, societyNamespace]);
 
   // Firestore sync: Logs
   useEffect(() => {
     if (!isAdminUnlocked) return;
-    const q = query(collection(db, 'service_logs'), orderBy('startTime', 'desc'), limit(100));
-    return onSnapshot(q, (snapshot) => {
-      const newLogs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ServiceLog));
+    const q = query(scopeCollection('service_logs'), orderBy('startTime', 'desc'), limit(100));
+    return onSnapshot(q, (snapshot: any) => {
+      const newLogs = snapshot.docs.map((doc: any) => ({
+        id: doc.id,
+        ...(doc.data() as Record<string, unknown>),
+      } as ServiceLog));
       setLogs(newLogs);
-    }, (error) => {
+    }, (error: any) => {
       handleFirestoreError(error, OperationType.LIST, 'service_logs');
     });
-  }, [isAdminUnlocked]);
+  }, [isAdminUnlocked, societyNamespace]);
 
   const seedInitialItems = async () => {
     const batch = writeBatch(db);
     INITIAL_ITEMS.forEach((title, index) => {
-      const newDoc = doc(collection(db, 'service_items'));
+      const newDoc = doc(scopeCollection('service_items'));
       batch.set(newDoc, {
         title,
         speaker: '',
@@ -417,12 +579,12 @@ export default function App() {
 
   const seedCommonItems = async () => {
     // Prevent duplicates: fetch existing titles
-    const snapshot = await getDocs(collection(db, 'common_items'));
-    const existingTitles = new Set(snapshot.docs.map(doc => doc.data().title?.trim().toLowerCase()));
+    const snapshot = await getDocs(scopeCollection('common_items'));
+    const existingTitles = new Set(snapshot.docs.map((doc: any) => (doc.data() as { title?: string }).title?.trim().toLowerCase()));
     const batch = writeBatch(db);
     COMMON_ITEMS.forEach((title) => {
       if (!existingTitles.has(title.trim().toLowerCase())) {
-        const newDoc = doc(collection(db, 'common_items'));
+        const newDoc = doc(scopeCollection('common_items'));
         batch.set(newDoc, { title });
       }
     });
@@ -439,7 +601,7 @@ export default function App() {
 
     const batch = writeBatch(db);
     missingDefaults.forEach((name) => {
-      const newDoc = doc(collection(db, 'service_types'));
+      const newDoc = doc(scopeCollection('service_types'));
       batch.set(newDoc, {
         name,
         startTime: '09:00 AM',
@@ -453,60 +615,101 @@ export default function App() {
 
   const addCommonItem = async () => {
     if (!newCommonItemTitle) return;
-    const newDoc = doc(collection(db, 'common_items'));
+    const newDoc = doc(scopeCollection('common_items'));
     await setDoc(newDoc, { title: newCommonItemTitle });
     setNewCommonItemTitle('');
   };
 
   const deleteCommonItem = async (id: string) => {
-    await deleteDoc(doc(db, 'common_items', id));
+    await deleteDoc(scopeDoc('common_items', id));
   };
 
   const handleLogin = async () => {
     setLoginError(null);
     setIsLoginLoading(true);
+    const trimmedPassword = adminPasswordInput.trim();
+    const trimmedSociety = selectedSociety.trim();
 
-    if (!adminPasswordInput.trim()) {
+    if (!trimmedPassword) {
       setLoginError('Enter the admin password.');
       setIsLoginLoading(false);
       return;
     }
 
     if (isStaticPagesHost) {
-      if (adminPasswordInput.trim() === STATIC_ADMIN_PASSWORD) {
-        localStorage.setItem(STATIC_ADMIN_UNLOCK_KEY, 'true');
+      if (loginMode === 'master') {
+        if (trimmedPassword === STATIC_MASTER_PASSWORD) {
+          localStorage.setItem(STATIC_ADMIN_SESSION_KEY, JSON.stringify({ role: 'master', society: null }));
+          setAdminRole('master');
+          setIsAdminUnlocked(true);
+          setAdminPasswordInput('');
+        } else {
+          setLoginError('Invalid master password.');
+          setIsAdminUnlocked(false);
+          setAdminRole(null);
+        }
+        setIsLoginLoading(false);
+        return;
+      }
+
+      const expectedPassword = STATIC_SOCIETY_PASSWORDS[trimmedSociety];
+      if (!expectedPassword) {
+        setLoginError(`No password configured for ${trimmedSociety}.`);
+        setIsAdminUnlocked(false);
+        setAdminRole(null);
+        setIsLoginLoading(false);
+        return;
+      }
+
+      if (trimmedPassword === expectedPassword) {
+        localStorage.setItem(STATIC_ADMIN_SESSION_KEY, JSON.stringify({ role: 'society', society: trimmedSociety }));
+        setAdminRole('society');
         setIsAdminUnlocked(true);
         setAdminPasswordInput('');
       } else {
-        setLoginError('Invalid admin password.');
+        setLoginError(`Invalid password for ${trimmedSociety}.`);
         setIsAdminUnlocked(false);
+        setAdminRole(null);
       }
       setIsLoginLoading(false);
       return;
     }
 
     try {
+      const requestBody: { password: string; society?: string } = { password: trimmedPassword };
+      if (loginMode === 'society') {
+        requestBody.society = trimmedSociety;
+      }
+
       const response = await fetch('/api/admin/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         credentials: 'include',
-        body: JSON.stringify({ password: adminPasswordInput.trim() }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
         const data = await response.json().catch(() => null);
         setLoginError(data?.message || 'Invalid admin password.');
         setIsAdminUnlocked(false);
+        setAdminRole(null);
         return;
       }
 
+      const data = await response.json().catch(() => null);
+      if (typeof data?.society === 'string' && data.society.trim()) {
+        setSelectedSociety(data.society.trim());
+      }
+
+      setAdminRole(data?.role === 'master' ? 'master' : 'society');
       setIsAdminUnlocked(true);
       setAdminPasswordInput('');
     } catch {
       setLoginError('Cannot reach auth server. Start backend with npm run dev:server.');
       setIsAdminUnlocked(false);
+      setAdminRole(null);
     } finally {
       setIsLoginLoading(false);
     }
@@ -514,8 +717,10 @@ export default function App() {
 
   const handleLogout = async () => {
     if (isStaticPagesHost) {
+      localStorage.removeItem(STATIC_ADMIN_SESSION_KEY);
       localStorage.removeItem(STATIC_ADMIN_UNLOCK_KEY);
       setIsAdminUnlocked(false);
+      setAdminRole(null);
       setView('display');
       setLoginError(null);
       return;
@@ -528,6 +733,7 @@ export default function App() {
     }
 
     setIsAdminUnlocked(false);
+    setAdminRole(null);
     setView('display');
     setLoginError(null);
   };
@@ -536,7 +742,7 @@ export default function App() {
     const nextUpdatedAt = Date.now();
     latestAppliedUpdatedAtRef.current = nextUpdatedAt;
     setState((prev) => ({ ...prev, ...updates, updatedAt: nextUpdatedAt }));
-    await setDoc(doc(db, 'service_config', 'current'), { ...updates, updatedAt: nextUpdatedAt }, { merge: true });
+    await setDoc(scopeDoc('service_config', 'current'), { ...updates, updatedAt: nextUpdatedAt }, { merge: true });
   };
 
   const forceIdleState = async () => {
@@ -555,7 +761,7 @@ export default function App() {
 
     latestAppliedUpdatedAtRef.current = nextUpdatedAt;
     setState(nextState);
-    await setDoc(doc(db, 'service_config', 'current'), nextState, { merge: false });
+    await setDoc(scopeDoc('service_config', 'current'), nextState, { merge: false });
   };
 
   const recordLog = async (endTime: number) => {
@@ -565,7 +771,7 @@ export default function App() {
     if (!item) return;
 
     try {
-      await addDoc(collection(db, 'service_logs'), {
+      await addDoc(scopeCollection('service_logs'), {
         date: new Date().toISOString(),
         serviceType: type?.name || 'Unknown',
         activityName: item.title,
@@ -690,7 +896,7 @@ export default function App() {
     }
 
     try {
-      const newDoc = doc(collection(db, 'service_types'));
+      const newDoc = doc(scopeCollection('service_types'));
       await setDoc(newDoc, {
         name: normalizedName,
         startTime: newServiceTypeStart,
@@ -707,12 +913,12 @@ export default function App() {
   };
 
   const deleteServiceType = async (id: string) => {
-    await deleteDoc(doc(db, 'service_types', id));
+    await deleteDoc(scopeDoc('service_types', id));
   };
 
   const addItem = async () => {
     if (!newItemTitle) return;
-    const newDoc = doc(collection(db, 'service_items'));
+    const newDoc = doc(scopeCollection('service_items'));
     await setDoc(newDoc, {
       title: newItemTitle,
       duration: newItemDuration,
@@ -736,14 +942,14 @@ export default function App() {
     // Reassign order fields sequentially
     const batch = writeBatch(db);
     newItems.forEach((item, idx) => {
-      batch.update(doc(db, 'service_items', item.id), { order: idx + 1 });
+      batch.update(scopeDoc('service_items', item.id), { order: idx + 1 });
     });
     await batch.commit();
   };
 
   const updateItemDuration = async (id: string, newDuration: number) => {
     if (!isAdminUnlocked) return;
-    await updateDoc(doc(db, 'service_items', id), { duration: newDuration });
+    await updateDoc(scopeDoc('service_items', id), { duration: newDuration });
     
     // If this is the active item and we're idle, update remaining time
     if (state.activeItemId === id && state.status === 'idle') {
@@ -778,7 +984,7 @@ export default function App() {
       await updateServiceState({ activeItemId: null, status: 'idle', startTime: null, remainingSeconds: 0 });
     }
 
-    await deleteDoc(doc(db, 'service_items', id));
+    await deleteDoc(scopeDoc('service_items', id));
   };
 
   const exportLogsCSV = () => {
@@ -897,7 +1103,12 @@ export default function App() {
   }, [isAdminUnlocked, state.serviceStartTime, serviceRemaining, activeServiceType]);
 
   const copyTVLink = () => {
-    const tvUrl = `${window.location.origin}${window.location.pathname}?mode=tv`;
+    const url = new URL(window.location.href);
+    url.searchParams.set('mode', 'tv');
+    if (selectedSociety.trim()) {
+      url.searchParams.set('society', selectedSociety.trim());
+    }
+    const tvUrl = `${url.origin}${url.pathname}?${url.searchParams.toString()}`;
     navigator.clipboard.writeText(tvUrl).then(() => {
       setTvLinkCopied(true);
       setTimeout(() => setTvLinkCopied(false), 2000);
@@ -954,7 +1165,9 @@ export default function App() {
             
             {isAdminUnlocked ? (
               <div className="flex items-center gap-3">
-                <span className="text-xs uppercase tracking-widest text-emerald-400">Admin</span>
+                <span className="text-xs uppercase tracking-widest text-emerald-400">
+                  {adminRole === 'master' ? 'Super Master' : `${selectedSociety || 'Society'} Admin`}
+                </span>
                 <button
                   onClick={copyTVLink}
                   title="Copy TV display URL — open this link on the TV"
@@ -967,6 +1180,34 @@ export default function App() {
               </div>
             ) : (
               <div className="flex flex-col items-end gap-1">
+                <div className="flex items-center gap-2 rounded-full bg-white/5 p-1 border border-white/10">
+                  <button
+                    type="button"
+                    onClick={() => setLoginMode('society')}
+                    className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${loginMode === 'society' ? 'bg-white text-black' : 'text-zinc-400 hover:text-white'}`}
+                  >
+                    Society Login
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLoginMode('master')}
+                    className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${loginMode === 'master' ? 'bg-white text-black' : 'text-zinc-400 hover:text-white'}`}
+                  >
+                    Super Master
+                  </button>
+                </div>
+                {loginMode === 'society' && (
+                  <select
+                    value={selectedSociety}
+                    disabled={isAdminUnlocked && adminRole === 'society'}
+                    onChange={(e) => setSelectedSociety(e.target.value)}
+                    className="w-full bg-zinc-900 border border-white/10 rounded-full px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500"
+                  >
+                    {availableSocieties.map((society) => (
+                      <option key={society} value={society}>{society}</option>
+                    ))}
+                  </select>
+                )}
                 <div className="flex items-center gap-2">
                   <input
                     type="password"
@@ -977,7 +1218,7 @@ export default function App() {
                         void handleLogin();
                       }
                     }}
-                    placeholder="Admin password"
+                    placeholder={loginMode === 'master' ? 'Super master password' : 'Society password'}
                     className="bg-zinc-900 border border-white/10 rounded-full px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500"
                   />
                   <button 
@@ -1623,7 +1864,7 @@ export default function App() {
                           <input 
                             type="text"
                             value={item.title}
-                            onChange={(e) => updateDoc(doc(db, 'service_items', item.id), { title: e.target.value })}
+                            onChange={(e) => updateDoc(scopeDoc('service_items', item.id), { title: e.target.value })}
                             className={`bg-transparent border-none font-bold uppercase tracking-tight text-lg focus:ring-0 w-full p-0 ${state.activeItemId === item.id ? 'text-emerald-400' : 'text-white'}`}
                           />
                           <div className="flex items-center gap-4 mt-2">
@@ -1642,7 +1883,7 @@ export default function App() {
                               <input 
                                 type="text"
                                 value={item.speaker || ''}
-                                onChange={(e) => updateDoc(doc(db, 'service_items', item.id), { speaker: e.target.value })}
+                                onChange={(e) => updateDoc(scopeDoc('service_items', item.id), { speaker: e.target.value })}
                                 placeholder="Add speaker..."
                                 className="bg-transparent border-none flex-1 p-0 text-sm focus:ring-0 font-mono"
                               />
