@@ -1262,9 +1262,11 @@ export default function App() {
                 </button>
                 <button onClick={handleLogout} className="text-sm text-zinc-400 hover:text-white">Lock</button>
               </div>
+            ) : view === 'display' ? (
+              /* On display view when not logged in — show nothing */
+              null
             ) : (
-              /* Only show login form when NOT on display view — on display view it's distracting */
-              view !== 'display' ? (
+              /* On control/setup/history when not logged in — show login form */
               <div className="relative">
                 <div className="absolute right-0 top-full mt-2 flex flex-col items-end gap-2 bg-zinc-950 border border-white/10 rounded-2xl p-3 shadow-2xl min-w-[280px]">
                   <div className="flex items-center gap-2 rounded-full bg-white/5 p-1 border border-white/10 w-full justify-center">
@@ -1324,16 +1326,6 @@ export default function App() {
                   )}
                 </div>
               </div>
-              ) : (
-                /* On display view when locked out — show a subtle admin hint instead */
-                <button
-                  onClick={() => setView('control')}
-                  className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors px-2 py-1 rounded"
-                  title="Go to Control Panel to log in"
-                >
-                  Admin
-                </button>
-              )
             )}
           </div>
         </nav>
