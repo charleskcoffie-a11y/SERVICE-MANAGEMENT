@@ -874,9 +874,14 @@ export default function App() {
       
       await updateServiceState({ status: 'paused', remainingSeconds: remaining, startTime: null });
     } else {
-      // Start/Resume
+      // Start/Resume — also auto-start service timer if not already running
       forceIdleLockUntilRef.current = 0;
-      await updateServiceState({ status: 'running', startTime: Date.now() });
+      const autoStartSvcTimer = state.activeServiceTypeId && !state.serviceStartTime;
+      await updateServiceState({
+        status: 'running',
+        startTime: Date.now(),
+        ...(autoStartSvcTimer ? { serviceStartTime: Date.now() } : {})
+      });
     }
   };
 
@@ -905,11 +910,14 @@ export default function App() {
     }
 
     setServiceComplete(false);
+    // Auto-start service timer if a service type is selected but session hasn't started yet.
+    const autoStartService = state.activeServiceTypeId && !state.serviceStartTime;
     await updateServiceState({
       activeItemId: itemId,
       status: 'idle',
       startTime: null,
-      remainingSeconds: item.duration * 60
+      remainingSeconds: item.duration * 60,
+      ...(autoStartService ? { serviceStartTime: Date.now() } : {})
     });
   };
 
@@ -1039,11 +1047,13 @@ export default function App() {
       }
 
       forceIdleLockUntilRef.current = 0;
+      const autoStartSvc = state.activeServiceTypeId && !state.serviceStartTime;
       await updateServiceState({
         activeItemId: item.id,
         status: 'running',
         startTime: Date.now(),
-        remainingSeconds: item.duration * 60
+        remainingSeconds: item.duration * 60,
+        ...(autoStartSvc ? { serviceStartTime: Date.now() } : {})
       });
     }
   };
