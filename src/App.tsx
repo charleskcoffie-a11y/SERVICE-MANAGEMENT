@@ -1247,62 +1247,64 @@ export default function App() {
                 <button onClick={handleLogout} className="text-sm text-zinc-400 hover:text-white">Lock</button>
               </div>
             ) : (
-              <div className="flex flex-col items-end gap-1">
-                <div className="flex items-center gap-2 rounded-full bg-white/5 p-1 border border-white/10">
-                  <button
-                    type="button"
-                    onClick={() => setLoginMode('society')}
-                    className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${loginMode === 'society' ? 'bg-white text-black' : 'text-zinc-400 hover:text-white'}`}
-                  >
-                    Society Login
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setLoginMode('master')}
-                    className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${loginMode === 'master' ? 'bg-white text-black' : 'text-zinc-400 hover:text-white'}`}
-                  >
-                    Super Master
-                  </button>
+              <div className="relative">
+                <div className="absolute right-0 top-full mt-2 flex flex-col items-end gap-2 bg-zinc-950 border border-white/10 rounded-2xl p-3 shadow-2xl min-w-[280px]">
+                  <div className="flex items-center gap-2 rounded-full bg-white/5 p-1 border border-white/10 w-full justify-center">
+                    <button
+                      type="button"
+                      onClick={() => setLoginMode('society')}
+                      className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${loginMode === 'society' ? 'bg-white text-black' : 'text-zinc-400 hover:text-white'}`}
+                    >
+                      Society Login
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLoginMode('master')}
+                      className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${loginMode === 'master' ? 'bg-white text-black' : 'text-zinc-400 hover:text-white'}`}
+                    >
+                      Super Master
+                    </button>
+                  </div>
+                  {loginMode === 'society' && (
+                    <select
+                      value={selectedSociety}
+                      disabled={isAdminUnlocked && adminRole === 'society'}
+                      onChange={(e) => setSelectedSociety(e.target.value)}
+                      className="w-full bg-zinc-900 border border-white/10 rounded-full px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500"
+                    >
+                      {availableSocieties.map((society) => (
+                        <option key={society} value={society}>{society}</option>
+                      ))}
+                    </select>
+                  )}
+                  <div className="flex items-center gap-2 w-full">
+                    <input
+                      type="password"
+                      value={adminPasswordInput}
+                      onChange={(e) => setAdminPasswordInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          void handleLogin();
+                        }
+                      }}
+                      placeholder={loginMode === 'master' ? 'Super master password' : 'Society password'}
+                      className="flex-1 bg-zinc-900 border border-white/10 rounded-full px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500"
+                    />
+                    <button 
+                      onClick={handleLogin}
+                      disabled={isLoginLoading}
+                      className="flex items-center gap-2 bg-white text-black px-4 py-1.5 rounded-full text-sm font-semibold hover:bg-zinc-200 transition-colors whitespace-nowrap"
+                    >
+                      <LogIn className="w-4 h-4" />
+                      {isLoginLoading ? 'Checking...' : 'Unlock'}
+                    </button>
+                  </div>
+                  {loginError && (
+                    <span className="text-[11px] leading-4 text-red-400 text-right w-full">
+                      {loginError}
+                    </span>
+                  )}
                 </div>
-                {loginMode === 'society' && (
-                  <select
-                    value={selectedSociety}
-                    disabled={isAdminUnlocked && adminRole === 'society'}
-                    onChange={(e) => setSelectedSociety(e.target.value)}
-                    className="w-full bg-zinc-900 border border-white/10 rounded-full px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500"
-                  >
-                    {availableSocieties.map((society) => (
-                      <option key={society} value={society}>{society}</option>
-                    ))}
-                  </select>
-                )}
-                <div className="flex items-center gap-2">
-                  <input
-                    type="password"
-                    value={adminPasswordInput}
-                    onChange={(e) => setAdminPasswordInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        void handleLogin();
-                      }
-                    }}
-                    placeholder={loginMode === 'master' ? 'Super master password' : 'Society password'}
-                    className="bg-zinc-900 border border-white/10 rounded-full px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500"
-                  />
-                  <button 
-                    onClick={handleLogin}
-                    disabled={isLoginLoading}
-                    className="flex items-center gap-2 bg-white text-black px-4 py-1.5 rounded-full text-sm font-semibold hover:bg-zinc-200 transition-colors"
-                  >
-                    <LogIn className="w-4 h-4" />
-                    {isLoginLoading ? 'Checking...' : 'Unlock'}
-                  </button>
-                </div>
-                {loginError && (
-                  <span className="max-w-[24rem] text-[11px] leading-4 text-red-400 text-right">
-                    {loginError}
-                  </span>
-                )}
               </div>
             )}
           </div>
