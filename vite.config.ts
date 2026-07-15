@@ -12,6 +12,8 @@ export default defineConfig(({mode}) => {
     plugins: [react(), tailwindcss()],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+      'import.meta.env.VITE_MASTER_ADMIN_PASSWORD': JSON.stringify(env.VITE_MASTER_ADMIN_PASSWORD ?? ''),
+      'import.meta.env.VITE_SOCIETY_ADMIN_PASSWORDS_JSON': JSON.stringify(env.VITE_SOCIETY_ADMIN_PASSWORDS_JSON ?? ''),
     },
     resolve: {
       alias: {

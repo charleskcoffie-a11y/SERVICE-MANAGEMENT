@@ -129,14 +129,8 @@ const STALE_ITEM_TIMER_MS = 1000 * 60 * 60 * 6;
 const STALE_SERVICE_TIMER_MS = 1000 * 60 * 60 * 12;
 const STALE_APP_STATE_MS = 1000 * 60 * 60 * 6;
 const DEFAULT_SOCIETIES = ['GMCT', 'St Pauls Baltemore'];
-const viteEnv = import.meta as ImportMeta & {
-  env?: {
-    VITE_MASTER_ADMIN_PASSWORD?: string;
-    VITE_SOCIETY_ADMIN_PASSWORDS_JSON?: string;
-  };
-};
-const STATIC_MASTER_PASSWORD = viteEnv.env?.VITE_MASTER_ADMIN_PASSWORD || 'admin123';
-const STATIC_SOCIETY_PASSWORDS = parseSocietyPasswordConfig(viteEnv.env?.VITE_SOCIETY_ADMIN_PASSWORDS_JSON);
+const STATIC_MASTER_PASSWORD = (import.meta.env.VITE_MASTER_ADMIN_PASSWORD as string | undefined) || 'admin123';
+const STATIC_SOCIETY_PASSWORDS = parseSocietyPasswordConfig(import.meta.env.VITE_SOCIETY_ADMIN_PASSWORDS_JSON as string | undefined);
 const STATIC_ADMIN_SESSION_KEY = 'service-management-admin-session';
 const STATIC_SELECTED_SOCIETY_KEY = 'service-management-selected-society';
 const STATIC_ADMIN_UNLOCK_KEY = 'service-management-admin-unlocked';
