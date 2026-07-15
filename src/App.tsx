@@ -177,6 +177,15 @@ function resolveSocietyName(value: string, options: string[]): string {
   return match || value.trim();
 }
 
+async function hashPassword(password: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode('svc-mgmt:' + password);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 export default function App() {
   const isStaticPagesHost = typeof window !== 'undefined' && window.location.hostname.endsWith('github.io');
   const isTVMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mode') === 'tv';
@@ -217,6 +226,13 @@ export default function App() {
   const [newCommonItemTitle, setNewCommonItemTitle] = useState('');
   const [serviceTypeMessage, setServiceTypeMessage] = useState<string | null>(null);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [passwordOverrides, setPasswordOverrides] = useState<Record<string, string>>({});
+  const [changingPasswordSociety, setChangingPasswordSociety] = useState<string | null>(null);
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState('');
+  const [passwordChangeError, setPasswordChangeError] = useState<string | null>(null);
+  const [passwordChangeSaving, setPasswordChangeSaving] = useState(false);
+  const [passwordChangeSuccess, setPasswordChangeSuccess] = useState<string | null>(null);
   const societyNamespace = useMemo(() => {
     if (normalizeSocietyName(selectedSociety) === 'gmct') {
       return null;
@@ -354,6 +370,22 @@ export default function App() {
 
     void loadSocieties();
   }, [isStaticPagesHost]);
+
+  // Load password overrides from Firestore (set by master admin in-app).
+  useEffect(() => {
+    if (isTVMode) return;
+    const unsubscribe = onSnapshot(doc(db, 'config', 'passwords'), (snap) => {
+      if (snap.exists()) {
+        const raw = snap.data() as Record<string, unknown>;
+        const overrides: Record<string, string> = {};
+        for (const [k, v] of Object.entries(raw)) {
+          if (typeof v === 'string') overrides[k.trim()] = v;
+        }
+        setPasswordOverrides(overrides);
+      }
+    }, () => { /* ignore permission errors */ });
+    return unsubscribe;
+  }, [isTVMode]);
 
   // Check server session on startup so admin state is not controlled by client storage.
   useEffect(() => {
@@ -632,13 +664,34 @@ export default function App() {
 
     if (isStaticPagesHost) {
       if (loginMode === 'master') {
-        if (trimmedPassword === STATIC_MASTER_PASSWORD) {
+        const masterHash = passwordOverrides['__master__'];
+        const inputHash = masterHash ? await hashPassword(trimmedPassword) : null;
+        const masterOk = masterHash ? inputHash === masterHash : trimmedPassword === STATIC_MASTER_PASSWORD;
+        if (masterOk) {
           localStorage.setItem(STATIC_ADMIN_SESSION_KEY, JSON.stringify({ role: 'master', society: null }));
           setAdminRole('master');
           setIsAdminUnlocked(true);
           setAdminPasswordInput('');
         } else {
           setLoginError('Invalid master password.');
+          setIsAdminUnlocked(false);
+          setAdminRole(null);
+        }
+        setIsLoginLoading(false);
+        return;
+      }
+
+      // Society login — check Firestore override hash first, then baked-in password.
+      const societyHash = passwordOverrides[trimmedSociety];
+      if (societyHash) {
+        const inputHash = await hashPassword(trimmedPassword);
+        if (inputHash === societyHash) {
+          localStorage.setItem(STATIC_ADMIN_SESSION_KEY, JSON.stringify({ role: 'society', society: trimmedSociety }));
+          setAdminRole('society');
+          setIsAdminUnlocked(true);
+          setAdminPasswordInput('');
+        } else {
+          setLoginError(`Invalid password for ${trimmedSociety}.`);
           setIsAdminUnlocked(false);
           setAdminRole(null);
         }
@@ -730,6 +783,33 @@ export default function App() {
     setAdminRole(null);
     setView('display');
     setLoginError(null);
+  };
+
+  const handleChangePassword = async (key: string) => {
+    setPasswordChangeError(null);
+    if (newPasswordInput.length < 4) {
+      setPasswordChangeError('Password must be at least 4 characters.');
+      return;
+    }
+    if (newPasswordInput !== newPasswordConfirm) {
+      setPasswordChangeError('Passwords do not match.');
+      return;
+    }
+    setPasswordChangeSaving(true);
+    try {
+      const hash = await hashPassword(newPasswordInput);
+      await setDoc(doc(db, 'config', 'passwords'), { [key]: hash }, { merge: true });
+      setChangingPasswordSociety(null);
+      setNewPasswordInput('');
+      setNewPasswordConfirm('');
+      const label = key === '__master__' ? 'Master' : key;
+      setPasswordChangeSuccess(`Password updated for ${label}.`);
+      setTimeout(() => setPasswordChangeSuccess(null), 4000);
+    } catch {
+      setPasswordChangeError('Failed to save. Check your connection.');
+    } finally {
+      setPasswordChangeSaving(false);
+    }
   };
 
   const updateServiceState = async (updates: Partial<ServiceState>) => {
@@ -1779,6 +1859,74 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+
+                {/* Change Passwords — master admin only */}
+                {adminRole === 'master' && (
+                  <div className="bg-zinc-900 border border-white/5 rounded-2xl p-6">
+                    <h2 className="text-sm font-mono text-zinc-500 uppercase tracking-widest mb-4">Society Passwords</h2>
+                    {passwordChangeSuccess && (
+                      <p className="text-xs text-emerald-400 mb-3">{passwordChangeSuccess}</p>
+                    )}
+                    <div className="space-y-3">
+                      {[...availableSocieties.map(s => ({ key: s, label: s })), { key: '__master__', label: 'Super Master' }].map(({ key, label }) => (
+                        <div key={key}>
+                          {changingPasswordSociety === key ? (
+                            <div className="bg-white/5 rounded-xl p-4 space-y-3">
+                              <p className="text-xs text-zinc-400 uppercase tracking-widest font-mono">{label}</p>
+                              <input
+                                type="password"
+                                value={newPasswordInput}
+                                onChange={(e) => { setNewPasswordInput(e.target.value); setPasswordChangeError(null); }}
+                                placeholder="New password"
+                                className="w-full bg-zinc-950 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                              />
+                              <input
+                                type="password"
+                                value={newPasswordConfirm}
+                                onChange={(e) => { setNewPasswordConfirm(e.target.value); setPasswordChangeError(null); }}
+                                placeholder="Confirm password"
+                                className="w-full bg-zinc-950 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                              />
+                              {passwordChangeError && (
+                                <p className="text-xs text-red-400">{passwordChangeError}</p>
+                              )}
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => void handleChangePassword(key)}
+                                  disabled={passwordChangeSaving}
+                                  className="flex-1 bg-emerald-500 text-black px-3 py-2 rounded-lg text-xs font-bold hover:bg-emerald-400 transition-colors disabled:opacity-50"
+                                >
+                                  {passwordChangeSaving ? 'Saving…' : 'Save'}
+                                </button>
+                                <button
+                                  onClick={() => { setChangingPasswordSociety(null); setNewPasswordInput(''); setNewPasswordConfirm(''); setPasswordChangeError(null); }}
+                                  className="px-3 py-2 rounded-lg text-xs text-zinc-400 hover:text-white bg-white/5 hover:bg-white/10 transition-colors"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-between bg-white/5 rounded-xl px-4 py-3">
+                              <span className="text-sm font-medium">
+                                {label}
+                                {passwordOverrides[key] && (
+                                  <span className="ml-2 text-[10px] text-emerald-500 uppercase tracking-widest">custom</span>
+                                )}
+                              </span>
+                              <button
+                                onClick={() => { setChangingPasswordSociety(key); setNewPasswordInput(''); setNewPasswordConfirm(''); setPasswordChangeError(null); }}
+                                className="text-xs text-zinc-400 hover:text-white bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg transition-colors"
+                              >
+                                Change
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Common Items Management */}
                 <div className="bg-zinc-900 border border-white/5 rounded-2xl p-6">
