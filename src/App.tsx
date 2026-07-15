@@ -894,6 +894,7 @@ export default function App() {
 
   const [serviceComplete, setServiceComplete] = useState(false);
   const selectItem = async (itemId: string) => {
+    if (!isAdminUnlocked) return;
     const item = items.find(i => i.id === itemId);
     if (!item) return;
 
@@ -1587,8 +1588,9 @@ export default function App() {
                         </div>
                         
                         <button 
+                          disabled={!isAdminUnlocked}
                           onClick={() => selectItem(item.id)}
-                          className={`p-3 rounded-xl transition-all ${state.activeItemId === item.id ? 'bg-emerald-500 text-black' : 'bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10'}`}
+                          className={`p-3 rounded-xl transition-all disabled:opacity-30 disabled:cursor-not-allowed ${state.activeItemId === item.id ? 'bg-emerald-500 text-black' : 'bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10'}`}
                           title="Select for Timer"
                         >
                           <Play className="w-5 h-5" />
