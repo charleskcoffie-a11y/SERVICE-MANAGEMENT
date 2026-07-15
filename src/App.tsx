@@ -920,8 +920,13 @@ export default function App() {
 
   const startService = async () => {
     if (!isAdminUnlocked) return;
-    forceIdleLockUntilRef.current = 0;
-    await updateServiceState({ serviceStartTime: Date.now() });
+    try {
+      forceIdleLockUntilRef.current = 0;
+      await updateServiceState({ serviceStartTime: Date.now() });
+    } catch (error) {
+      console.error('startService failed:', error);
+      alert('Failed to start service timer. Check console for details.');
+    }
   };
 
   const resetService = async () => {
