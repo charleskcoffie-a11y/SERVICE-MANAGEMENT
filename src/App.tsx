@@ -700,15 +700,9 @@ export default function App() {
       }
 
       const expectedPassword = STATIC_SOCIETY_PASSWORDS[trimmedSociety];
-      if (!expectedPassword) {
-        setLoginError(`No password configured for ${trimmedSociety}.`);
-        setIsAdminUnlocked(false);
-        setAdminRole(null);
-        setIsLoginLoading(false);
-        return;
-      }
-
-      if (trimmedPassword === expectedPassword) {
+      // If no society-specific password is configured, accept the master password as fallback.
+      const effectivePassword = expectedPassword || STATIC_MASTER_PASSWORD;
+      if (trimmedPassword === effectivePassword) {
         localStorage.setItem(STATIC_ADMIN_SESSION_KEY, JSON.stringify({ role: 'society', society: trimmedSociety }));
         setAdminRole('society');
         setIsAdminUnlocked(true);
