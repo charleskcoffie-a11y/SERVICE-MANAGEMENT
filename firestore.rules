@@ -69,5 +69,19 @@ service cloud.firestore {
     match /service_logs/{logId} {
       allow read, write: if true;
     }
+
+    // ===============================================================
+    // Config (password hashes, app settings)
+    // ===============================================================
+    match /config/{document} {
+      allow read, write: if true;
+    }
+
+    // ===============================================================
+    // Society-scoped collections (mirrors root rules)
+    // ===============================================================
+    match /societies/{societyId}/{document=**} {
+      allow read, write: if true;
+    }
   }
 }
