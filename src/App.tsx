@@ -1435,6 +1435,15 @@ export default function App() {
               exit={{ opacity: 0, y: -20 }}
               className="grid grid-cols-1 lg:grid-cols-3 gap-8"
             >
+              {!isAdminUnlocked && (
+                <div className="lg:col-span-3 flex items-center gap-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl px-6 py-4">
+                  <LogIn className="w-5 h-5 text-emerald-400 shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold text-emerald-400">Admin login required to control the service.</p>
+                    <p className="text-xs text-zinc-400 mt-0.5">Click the login panel in the top-right corner to unlock. For public/TV display, use the <span className="text-white font-medium">Display tab</span> (monitor icon).</p>
+                  </div>
+                </div>
+              )}
               {/* Left Column: Timer Controls */}
               <div className="lg:col-span-1 space-y-6">
                 {/* Service Selection & Global Timer */}
