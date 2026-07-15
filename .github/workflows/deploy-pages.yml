@@ -36,6 +36,8 @@ jobs:
       - name: Build
         env:
           GITHUB_ACTIONS: true
+          VITE_MASTER_ADMIN_PASSWORD: ${{ secrets.VITE_MASTER_ADMIN_PASSWORD }}
+          VITE_SOCIETY_ADMIN_PASSWORDS_JSON: ${{ secrets.VITE_SOCIETY_ADMIN_PASSWORDS_JSON }}
         run: npm run build
 
       - name: Upload Pages artifact
